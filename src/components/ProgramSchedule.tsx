@@ -1,0 +1,772 @@
+'use client';
+
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { usePlayer } from '@/lib/player-context';
+import { formatTime } from '@/lib/radiko-parser';
+
+interface Program {
+  id: string;
+  stationId: string;
+  title: string;
+  subtitle: string;
+  performer: string;
+  description: string;
+  info: string;
+  url: string;
+  imageUrl: string;
+  startTime: string;
+  endTime: string;
+  duration: number;
+  isOnAir: boolean;
+  isTimefree: boolean;
+}
+
+interface Station {
+  id: string;
+  name: string;
+  asciiName: string;
+  href: string;
+  logoUrl: string;
+}
+
+interface StationData {
+  station: Station;
+  programs: Program[];
+}
+
+interface NoaItem {
+  title: string;
+  artist: string;
+  stamp: string;
+  img: string;
+  imgLarge: string;
+  amazon: string;
+  itunes: string;
+  recochoku: string;
+  id: string;
+}
+
+// Get the current radiko broadcast date in YYYYMMDD (JST, day starts at 05:00)
+function getRadikoBroadcastDate(offset = 0): string {
+  const now = new Date();
+  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  if (jst.getUTCHours() < 5) {
+    jst.setUTCDate(jst.getUTCDate() - 1);
+  }
+  jst.setUTCDate(jst.getUTCDate() + offset);
+  const y = jst.getUTCFullYear();
+  const m = String(jst.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(jst.getUTCDate()).padStart(2, '0');
+  return `${y}${m}${d}`;
+}
+
+function formatDateLabel(dateStr: string, todayStr: string): string {
+  const m = parseInt(dateStr.substring(4, 6), 10);
+  const d = parseInt(dateStr.substring(6, 8), 10);
+  if (dateStr === todayStr) return 'Today';
+  const y = parseInt(dateStr.substring(0, 4), 10);
+  const date = new Date(y, m - 1, d);
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  return `${m}/${d} (${days[date.getDay()]})`;
+}
+
+// Format stamp "2026-04-01T12:00:28+09:00" -> "12:00"
+function formatStamp(stamp: string): string {
+  if (!stamp) return '';
+  const m = stamp.match(/T(\d{2}):(\d{2})/);
+  return m ? `${m[1]}:${m[2]}` : '';
+}
+
+// Format duration in seconds to human-readable "1h 30m" or "45m"
+function formatDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0 && m > 0) return `${h}h ${m}m`;
+  if (h > 0) return `${h}h`;
+  return `${m}m`;
+}
+
+const PLACEHOLDER_IMG = 'https://ac-static.cf.radiko.jp/jacket_placeholder.png';
+const PLACEHOLDER_IMG_LARGE = 'https://ac-static.cf.radiko.jp/jacket_placeholder_large.jpeg';
+
+function isRealImage(url: string): boolean {
+  return !!url && url !== PLACEHOLDER_IMG && url !== PLACEHOLDER_IMG_LARGE;
+}
+
+// --- Song list for a program's detail view ---
+function SongList({ stationId, ft, to, compact }: { stationId: string; ft: string; to: string; compact?: boolean }) {
+  const [songs, setSongs] = useState<NoaItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`/api/noa?stationId=${stationId}&ft=${ft}&to=${to}`)
+      .then((r) => r.json())
+      .then((d) => setSongs(d.items || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [stationId, ft, to]);
+
+  if (loading) {
+    return (
+      <div className="py-3">
+        <div className="animate-pulse flex gap-2 items-center">
+          <div className="w-4 h-4 bg-gray-200 dark:bg-gray-700 rounded-full" />
+          <div className="h-3 w-32 bg-gray-200 dark:bg-gray-700 rounded" />
+        </div>
+      </div>
+    );
+  }
+
+  if (songs.length === 0) return null;
+
+  return (
+    <div className="space-y-1">
+      <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+        Songs ({songs.length})
+      </h3>
+      {songs.map((song) => (
+        <div key={song.id} className={`flex items-center gap-2.5 py-1.5 group ${compact ? '' : 'py-2'}`}>
+          {isRealImage(song.img) ? (
+            <img src={song.img} alt="" className={`rounded object-cover flex-shrink-0 ${compact ? 'w-8 h-8' : 'w-10 h-10'}`} />
+          ) : (
+            <div className={`rounded bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0 ${compact ? 'w-8 h-8' : 'w-10 h-10'}`}>
+              <svg className="w-4 h-4 text-gray-400" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
+              </svg>
+            </div>
+          )}
+          <div className="flex-1 min-w-0">
+            <p className={`font-medium truncate leading-tight ${compact ? 'text-xs' : 'text-sm'}`}>{song.title}</p>
+            <p className={`text-gray-500 dark:text-gray-400 truncate leading-tight ${compact ? 'text-[11px]' : 'text-xs'}`}>{song.artist}</p>
+          </div>
+          <span className="text-[10px] text-gray-400 dark:text-gray-500 font-mono flex-shrink-0">
+            {formatStamp(song.stamp)}
+          </span>
+          {(song.itunes || song.amazon) && (
+            <div className="flex gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+              {song.itunes && (
+                <a href={song.itunes} target="_blank" rel="noopener noreferrer"
+                  className="w-6 h-6 flex items-center justify-center rounded bg-gray-100 dark:bg-gray-700 hover:bg-pink-100 dark:hover:bg-pink-900/30 transition-colors"
+                  title="Apple Music">
+                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" /></svg>
+                </a>
+              )}
+              {song.amazon && (
+                <a href={song.amazon} target="_blank" rel="noopener noreferrer"
+                  className="w-6 h-6 flex items-center justify-center rounded bg-gray-100 dark:bg-gray-700 hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors"
+                  title="Amazon">
+                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M1 16c3.04 2.19 7.4 3.5 12 3.5 3.2 0 6.7-.7 9.6-2.1.5-.2.9.3.5.7C20.3 20.4 16.5 22 12 22 7.3 22 3.1 20.2.4 17.2c-.3-.4.1-.8.6-.5z" /></svg>
+                </a>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// --- Program Detail View (the main content area) ---
+function ProgramDetail({
+  program,
+  station,
+  stationId,
+  noaItems,
+  isStationLive,
+  onPlayLive,
+  onPlayTimefree,
+  currentInfo,
+  isPlaying,
+}: {
+  program: Program | null;
+  station: Station | null;
+  stationId: string;
+  noaItems: NoaItem[];
+  isStationLive: boolean;
+  onPlayLive: () => void;
+  onPlayTimefree: (p: Program) => void;
+  currentInfo: { stationId: string; type: string; ft?: string } | null;
+  isPlaying: boolean;
+}) {
+  if (!station) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="animate-spin w-8 h-8 border-2 border-gray-300 border-t-blue-500 rounded-full" />
+      </div>
+    );
+  }
+
+  const latestSong = noaItems.length > 0 ? noaItems[0] : null;
+  const isThisProgramPlaying = program && currentInfo?.stationId === station.id && isPlaying &&
+    ((currentInfo?.type === 'timefree' && currentInfo?.ft === program.startTime) ||
+     (currentInfo?.type === 'live' && program.isOnAir));
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* Station header */}
+      <div className="flex items-center gap-3">
+        <img
+          src={station.logoUrl}
+          alt={station.name}
+          className="w-12 h-12 rounded-xl object-contain bg-white border border-gray-100 dark:border-gray-700 flex-shrink-0"
+        />
+        <div className="flex-1 min-w-0">
+          <h1 className="text-lg font-bold truncate">{station.name}</h1>
+          {station.asciiName && (
+            <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{station.asciiName}</p>
+          )}
+        </div>
+        <button
+          onClick={onPlayLive}
+          className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-sm font-medium transition-colors flex-shrink-0 ${
+            isStationLive
+              ? 'bg-red-500 text-white'
+              : 'bg-blue-500 text-white hover:bg-blue-600'
+          }`}
+        >
+          {isStationLive ? (
+            <>
+              <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
+              On Air
+            </>
+          ) : (
+            <>
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+              Live
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Now playing song bar (for live) */}
+      {latestSong && latestSong.title && (
+        <div className="flex items-center gap-2.5 p-2.5 rounded-lg bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/20 dark:to-emerald-950/20 border border-green-200/60 dark:border-green-800/40">
+          {isRealImage(latestSong.img) ? (
+            <img src={latestSong.img} alt="" className="w-10 h-10 rounded shadow-sm object-cover flex-shrink-0" />
+          ) : (
+            <div className="w-10 h-10 rounded bg-green-100 dark:bg-green-900/30 flex items-center justify-center flex-shrink-0">
+              <svg className="w-5 h-5 text-green-500" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
+              </svg>
+            </div>
+          )}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1">
+              <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse flex-shrink-0" />
+              <span className="text-[10px] font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide">
+                Now Playing
+              </span>
+            </div>
+            <p className="text-sm font-medium truncate leading-tight">{latestSong.title}</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 truncate leading-tight">{latestSong.artist}</p>
+          </div>
+          {(latestSong.itunes || latestSong.amazon) && (
+            <div className="flex gap-1 flex-shrink-0">
+              {latestSong.itunes && (
+                <a href={latestSong.itunes} target="_blank" rel="noopener noreferrer"
+                  className="w-7 h-7 flex items-center justify-center rounded-full bg-white/80 dark:bg-gray-800 hover:bg-pink-50 dark:hover:bg-pink-900/30 transition-colors shadow-sm"
+                  title="Apple Music">
+                  <svg className="w-3.5 h-3.5 text-pink-500" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" /></svg>
+                </a>
+              )}
+              {latestSong.amazon && (
+                <a href={latestSong.amazon} target="_blank" rel="noopener noreferrer"
+                  className="w-7 h-7 flex items-center justify-center rounded-full bg-white/80 dark:bg-gray-800 hover:bg-orange-50 dark:hover:bg-orange-900/30 transition-colors shadow-sm"
+                  title="Amazon">
+                  <svg className="w-3.5 h-3.5 text-orange-500" viewBox="0 0 24 24" fill="currentColor"><path d="M1 16c3.04 2.19 7.4 3.5 12 3.5 3.2 0 6.7-.7 9.6-2.1.5-.2.9.3.5.7C20.3 20.4 16.5 22 12 22 7.3 22 3.1 20.2.4 17.2c-.3-.4.1-.8.6-.5z" /></svg>
+                </a>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Divider */}
+      <div className="border-t border-gray-200 dark:border-gray-700" />
+
+      {/* Selected program detail */}
+      {program ? (
+        <div className="flex flex-col gap-4">
+          {/* Program header: image + info */}
+          <div className="flex gap-4">
+            {program.imageUrl ? (
+              <img
+                src={program.imageUrl}
+                alt=""
+                className="w-24 h-24 sm:w-32 sm:h-32 rounded-lg object-cover flex-shrink-0 bg-gray-100 dark:bg-gray-800"
+              />
+            ) : (
+              <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-lg flex-shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
+                <svg className="w-10 h-10 text-gray-300 dark:text-gray-600" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM8 15l2.5-3.21 1.79 2.15 2.5-3.22L19 15H5l3 0z" />
+                </svg>
+              </div>
+            )}
+            <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+              <div className="flex items-start gap-2">
+                <h2 className="text-lg font-bold leading-tight flex-1">{program.title}</h2>
+                {program.isOnAir && (
+                  <span className="text-[10px] font-bold bg-red-500 text-white px-1.5 py-0.5 rounded flex-shrink-0 mt-0.5">
+                    LIVE
+                  </span>
+                )}
+              </div>
+              {program.subtitle && (
+                <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2">{program.subtitle}</p>
+              )}
+              {program.performer && (
+                <p className="text-sm text-gray-500 dark:text-gray-400">{program.performer}</p>
+              )}
+              <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 font-mono">
+                <span>{formatTime(program.startTime)} - {formatTime(program.endTime)}</span>
+                <span className="text-gray-300 dark:text-gray-600">|</span>
+                <span>{formatDuration(program.duration)}</span>
+              </div>
+              {/* Play button */}
+              {(program.isTimefree || program.isOnAir) && (
+                <div className="mt-1">
+                  {program.isOnAir ? (
+                    <button
+                      onClick={onPlayLive}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                        isStationLive
+                          ? 'bg-red-500 text-white'
+                          : 'bg-blue-500 text-white hover:bg-blue-600'
+                      }`}
+                    >
+                      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M8 5v14l11-7z" />
+                      </svg>
+                      {isStationLive ? 'Listening Live' : 'Listen Live'}
+                    </button>
+                  ) : program.isTimefree && (
+                    <button
+                      onClick={() => onPlayTimefree(program)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                        isThisProgramPlaying
+                          ? 'bg-blue-500 text-white'
+                          : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-blue-500 hover:text-white'
+                      }`}
+                    >
+                      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M8 5v14l11-7z" />
+                      </svg>
+                      {isThisProgramPlaying ? 'Playing' : 'Timefree'}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Program description / info */}
+          {(program.description || program.info) && (
+            <div className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed space-y-2">
+              {program.description && (
+                <div dangerouslySetInnerHTML={{ __html: program.description }} className="program-html" />
+              )}
+              {program.info && (
+                <div dangerouslySetInnerHTML={{ __html: program.info }} className="program-html" />
+              )}
+            </div>
+          )}
+
+          {/* Program link */}
+          {program.url && (
+            <a
+              href={program.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-sm text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z" />
+              </svg>
+              Program website
+            </a>
+          )}
+
+          {/* Song list */}
+          <SongList stationId={stationId} ft={program.startTime} to={program.endTime} />
+        </div>
+      ) : (
+        <div className="text-center py-10 text-gray-400 dark:text-gray-500">
+          <svg className="w-12 h-12 mx-auto mb-3 text-gray-300 dark:text-gray-600" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
+          </svg>
+          <p className="text-sm">Select a program from the schedule</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- Compact schedule list (used in sidebar and drawer) ---
+function ScheduleList({
+  programs,
+  stationId,
+  selectedProgramId,
+  onSelectProgram,
+  onPlayTimefree,
+  currentInfo,
+  isPlaying,
+  isToday,
+  onAirRef,
+}: {
+  programs: Program[];
+  stationId: string;
+  selectedProgramId: string | null;
+  onSelectProgram: (p: Program) => void;
+  onPlayTimefree: (p: Program) => void;
+  currentInfo: { stationId: string; type: string; ft?: string } | null;
+  isPlaying: boolean;
+  isToday: boolean;
+  onAirRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  return (
+    <div className="py-0.5">
+      {programs.map((program) => {
+        const isNowPlaying =
+          currentInfo?.stationId === stationId &&
+          isPlaying &&
+          ((currentInfo?.type === 'timefree' && currentInfo?.ft === program.startTime) ||
+           (currentInfo?.type === 'live' && program.isOnAir));
+        const isSelected = selectedProgramId === program.id;
+
+        return (
+          <div
+            key={program.id}
+            ref={program.isOnAir && isToday ? onAirRef : undefined}
+            className={`flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors border-l-2 ${
+              isSelected
+                ? 'border-l-blue-500 bg-blue-50 dark:bg-blue-950/20'
+                : program.isOnAir
+                ? 'border-l-red-500 bg-red-50/50 dark:bg-red-950/10'
+                : isNowPlaying
+                ? 'border-l-blue-400 bg-blue-50/50 dark:bg-blue-950/10'
+                : 'border-l-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
+            }`}
+            onClick={() => onSelectProgram(program)}
+          >
+            {/* Time */}
+            <div className="flex-shrink-0 w-10 text-center">
+              <span className="text-[11px] font-mono text-gray-500 dark:text-gray-400 leading-none">
+                {formatTime(program.startTime)}
+              </span>
+            </div>
+
+            {/* Title + performer */}
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium truncate leading-tight">{program.title}</p>
+              {program.performer && (
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate leading-tight">
+                  {program.performer}
+                </p>
+              )}
+            </div>
+
+            {/* Badges */}
+            <div className="flex items-center gap-1 flex-shrink-0">
+              {program.isOnAir && (
+                <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
+              )}
+              {program.isTimefree && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onPlayTimefree(program); }}
+                  className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors ${
+                    isNowPlaying
+                      ? 'bg-blue-500 text-white'
+                      : 'text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30'
+                  }`}
+                  title="Play timefree"
+                >
+                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// --- Mobile bottom sheet drawer ---
+function ScheduleDrawer({
+  isOpen,
+  onClose,
+  children,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const backdropRef = useRef<HTMLDivElement>(null);
+
+  // Prevent body scroll when open
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 lg:hidden">
+      {/* Backdrop */}
+      <div
+        ref={backdropRef}
+        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      {/* Sheet */}
+      <div className="absolute bottom-0 left-0 right-0 bg-white dark:bg-gray-900 rounded-t-2xl max-h-[85vh] flex flex-col shadow-2xl animate-slide-up">
+        {/* Handle */}
+        <div className="flex items-center justify-center pt-3 pb-1 flex-shrink-0">
+          <div className="w-10 h-1 rounded-full bg-gray-300 dark:bg-gray-600" />
+        </div>
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 pb-2 flex-shrink-0">
+          <h3 className="font-semibold text-base">Schedule</h3>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+          >
+            <svg className="w-5 h-5 text-gray-500" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+            </svg>
+          </button>
+        </div>
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto min-h-0 pb-safe">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Main component ---
+export default function ProgramSchedule({ stationId }: { stationId: string }) {
+  const { dates, todayStr } = useMemo(() => {
+    const today = getRadikoBroadcastDate(0);
+    const list: string[] = [];
+    for (let i = 0; i >= -7; i--) {
+      list.push(getRadikoBroadcastDate(i));
+    }
+    return { dates: list, todayStr: today };
+  }, []);
+
+  const [selectedDate, setSelectedDate] = useState(dates[0]);
+  const [data, setData] = useState<StationData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [noaItems, setNoaItems] = useState<NoaItem[]>([]);
+  const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const { playLive, playTimefree, currentInfo, isPlaying } = usePlayer();
+
+  const scheduleRef = useRef<HTMLDivElement>(null);
+  const onAirRef = useRef<HTMLDivElement>(null);
+  const hasScrolledRef = useRef(false);
+
+  // Fetch program schedule
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    hasScrolledRef.current = false;
+    const params = new URLSearchParams({ stationId, date: selectedDate });
+    fetch(`/api/programs?${params}`)
+      .then((res) => res.json())
+      .then((d) => {
+        if (d.error) throw new Error(d.error);
+        setData(d);
+        // Auto-select on-air program for today, or first program for past dates
+        if (selectedDate === todayStr) {
+          const onAir = d.programs?.find((p: Program) => p.isOnAir);
+          setSelectedProgramId(onAir?.id || d.programs?.[0]?.id || null);
+        } else {
+          setSelectedProgramId(d.programs?.[0]?.id || null);
+        }
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [stationId, selectedDate, todayStr]);
+
+  // Fetch NOA (now-on-air) for live display, poll every 30s
+  useEffect(() => {
+    let active = true;
+    const fetchNoa = () => {
+      fetch(`/api/noa?stationId=${stationId}`)
+        .then((res) => res.json())
+        .then((d) => {
+          if (active && d.items) setNoaItems(d.items);
+        })
+        .catch(() => {});
+    };
+    fetchNoa();
+    const interval = setInterval(fetchNoa, 30000);
+    return () => { active = false; clearInterval(interval); };
+  }, [stationId]);
+
+  // Auto-scroll to on-air program in schedule
+  useEffect(() => {
+    if (loading || hasScrolledRef.current) return;
+    if (selectedDate !== todayStr) return;
+    const timer = setTimeout(() => {
+      if (onAirRef.current && scheduleRef.current) {
+        const container = scheduleRef.current;
+        const target = onAirRef.current;
+        const containerRect = container.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        container.scrollTo({
+          top: container.scrollTop + (targetRect.top - containerRect.top) - 8,
+          behavior: 'smooth',
+        });
+        hasScrolledRef.current = true;
+      }
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [loading, selectedDate, todayStr]);
+
+  const handlePlayLive = useCallback(() => {
+    if (!data) return;
+    const onAir = data.programs.find((p) => p.isOnAir);
+    playLive({
+      stationId: data.station.id,
+      stationName: data.station.name,
+      stationLogo: data.station.logoUrl,
+      type: 'live',
+      title: onAir?.title || `${data.station.name} Live`,
+      performer: onAir?.performer || data.station.name,
+    });
+  }, [data, playLive]);
+
+  const handlePlayTimefree = useCallback(
+    (program: Program) => {
+      if (!data) return;
+      playTimefree({
+        stationId: data.station.id,
+        stationName: data.station.name,
+        stationLogo: data.station.logoUrl,
+        type: 'timefree',
+        title: program.title,
+        performer: program.performer || data.station.name,
+        ft: program.startTime,
+        to: program.endTime,
+        duration: program.duration,
+      });
+    },
+    [data, playTimefree]
+  );
+
+  const handleSelectProgram = useCallback((program: Program) => {
+    setSelectedProgramId(program.id);
+    setDrawerOpen(false);
+  }, []);
+
+  const isToday = selectedDate === todayStr;
+  const isStationLive =
+    currentInfo?.stationId === stationId && isPlaying && currentInfo?.type === 'live';
+  const selectedProgram = data?.programs.find((p) => p.id === selectedProgramId) || null;
+
+  // Date selector + schedule list (shared between sidebar and drawer)
+  const scheduleContent = (
+    <>
+      {/* Date selector */}
+      <div className="px-3 py-2 overflow-x-auto scrollbar-none border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+        <div className="flex gap-1 min-w-max">
+          {dates.map((d) => (
+            <button
+              key={d}
+              onClick={() => setSelectedDate(d)}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
+                d === selectedDate
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+              }`}
+            >
+              {formatDateLabel(d, todayStr)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Schedule list */}
+      {loading ? (
+        <div className="flex items-center justify-center py-10">
+          <div className="animate-spin w-6 h-6 border-2 border-gray-300 border-t-blue-500 rounded-full" />
+        </div>
+      ) : error || !data ? (
+        <div className="text-center py-10">
+          <p className="text-red-500 text-sm">{error || 'Failed to load'}</p>
+        </div>
+      ) : (
+        <ScheduleList
+          programs={data.programs}
+          stationId={stationId}
+          selectedProgramId={selectedProgramId}
+          onSelectProgram={handleSelectProgram}
+          onPlayTimefree={handlePlayTimefree}
+          currentInfo={currentInfo}
+          isPlaying={isPlaying}
+          isToday={isToday}
+          onAirRef={onAirRef}
+        />
+      )}
+    </>
+  );
+
+  return (
+    <>
+      <div className="flex gap-0 lg:gap-6 h-[calc(100vh-3.5rem-4.5rem)]">
+        {/* === Left: Program detail (main area) === */}
+        <div className="flex-1 min-w-0 overflow-y-auto pb-24 pr-0 lg:pr-2">
+          <ProgramDetail
+            program={selectedProgram}
+            station={data?.station || null}
+            stationId={stationId}
+            noaItems={noaItems}
+            isStationLive={isStationLive}
+            onPlayLive={handlePlayLive}
+            onPlayTimefree={handlePlayTimefree}
+            currentInfo={currentInfo}
+            isPlaying={isPlaying}
+          />
+        </div>
+
+        {/* === Right: Schedule sidebar (desktop only) === */}
+        <div className="hidden lg:flex flex-col w-80 xl:w-96 flex-shrink-0 border-l border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div ref={scheduleRef} className="flex-1 overflow-y-auto min-h-0">
+            {scheduleContent}
+          </div>
+        </div>
+      </div>
+
+      {/* === Mobile: Floating schedule button === */}
+      <button
+        onClick={() => setDrawerOpen(true)}
+        className="lg:hidden fixed bottom-20 right-4 z-40 w-12 h-12 bg-blue-500 text-white rounded-full shadow-lg flex items-center justify-center hover:bg-blue-600 active:bg-blue-700 transition-colors"
+        aria-label="Open schedule"
+      >
+        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z" />
+        </svg>
+      </button>
+
+      {/* === Mobile: Schedule drawer === */}
+      <ScheduleDrawer isOpen={drawerOpen} onClose={() => setDrawerOpen(false)}>
+        {scheduleContent}
+      </ScheduleDrawer>
+    </>
+  );
+}
