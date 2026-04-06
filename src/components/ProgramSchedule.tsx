@@ -77,6 +77,38 @@ function formatStamp(stamp: string): string {
   return m ? `${m[1]}:${m[2]}` : '';
 }
 
+// Parse stamp "2026-04-01T12:00:28+09:00" -> epoch ms
+function parseStampMs(stamp: string): number {
+  if (!stamp) return 0;
+  return new Date(stamp).getTime();
+}
+
+// Parse YYYYMMDDHHmmss (JST) -> epoch ms
+function parseFtMs(ft: string): number {
+  const y = parseInt(ft.substring(0, 4), 10);
+  const mo = parseInt(ft.substring(4, 6), 10) - 1;
+  const d = parseInt(ft.substring(6, 8), 10);
+  const h = parseInt(ft.substring(8, 10), 10);
+  const min = parseInt(ft.substring(10, 12), 10);
+  const sec = parseInt(ft.substring(12, 14), 10);
+  return Date.UTC(y, mo, d, h - 9, min, sec);
+}
+
+// Find the song that is playing at a given offset (seconds) from ft
+function findSongAtTime(songs: NoaItem[], ft: string, offsetSec: number): NoaItem | null {
+  if (!songs.length || !ft) return null;
+  const playbackMs = parseFtMs(ft) + offsetSec * 1000;
+  // Songs are in chronological order; find the last song whose stamp <= playbackMs
+  let best: NoaItem | null = null;
+  for (const song of songs) {
+    const stampMs = parseStampMs(song.stamp);
+    if (stampMs && stampMs <= playbackMs) {
+      best = song;
+    }
+  }
+  return best;
+}
+
 // Format duration in seconds to human-readable "1h 30m" or "45m"
 function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -174,6 +206,7 @@ function ProgramDetail({
   station,
   stationId,
   noaItems,
+  nowPlayingSong,
   isStationLive,
   onPlayLive,
   onPlayTimefree,
@@ -184,6 +217,7 @@ function ProgramDetail({
   station: Station | null;
   stationId: string;
   noaItems: NoaItem[];
+  nowPlayingSong: NoaItem | null;
   isStationLive: boolean;
   onPlayLive: () => void;
   onPlayTimefree: (p: Program) => void;
@@ -242,48 +276,71 @@ function ProgramDetail({
         </button>
       </div>
 
-      {/* Now playing song bar (for live) */}
-      {latestSong && latestSong.title && (
-        <div className="flex items-center gap-2.5 p-2.5 rounded-lg bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/20 dark:to-emerald-950/20 border border-green-200/60 dark:border-green-800/40">
-          {isRealImage(latestSong.img) ? (
-            <img src={latestSong.img} alt="" className="w-10 h-10 rounded shadow-sm object-cover flex-shrink-0" />
-          ) : (
-            <div className="w-10 h-10 rounded bg-green-100 dark:bg-green-900/30 flex items-center justify-center flex-shrink-0">
-              <svg className="w-5 h-5 text-green-500" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
-              </svg>
+      {/* Now playing song bar */}
+      {(() => {
+        const song = nowPlayingSong || (latestSong?.title ? latestSong : null);
+        if (!song) return null;
+        const isTimefreeMode = !!nowPlayingSong;
+        return (
+          <div className={`flex items-center gap-2 sm:gap-2.5 p-2 sm:p-2.5 rounded-lg bg-gradient-to-r border ${
+            isTimefreeMode
+              ? 'from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 border-blue-200/60 dark:border-blue-800/40'
+              : 'from-green-50 to-emerald-50 dark:from-green-950/20 dark:to-emerald-950/20 border-green-200/60 dark:border-green-800/40'
+          }`}>
+            {isRealImage(song.img) ? (
+              <img src={song.img} alt="" className="w-9 h-9 sm:w-10 sm:h-10 rounded shadow-sm object-cover flex-shrink-0" />
+            ) : (
+              <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded flex items-center justify-center flex-shrink-0 ${
+                isTimefreeMode
+                  ? 'bg-blue-100 dark:bg-blue-900/30'
+                  : 'bg-green-100 dark:bg-green-900/30'
+              }`}>
+                <svg className={`w-5 h-5 ${isTimefreeMode ? 'text-blue-500' : 'text-green-500'}`} viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
+                </svg>
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1">
+                {isTimefreeMode ? (
+                  <svg className="w-3 h-3 text-blue-500 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
+                  </svg>
+                ) : (
+                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse flex-shrink-0" />
+                )}
+                <span className={`text-[10px] font-semibold uppercase tracking-wide ${
+                  isTimefreeMode
+                    ? 'text-blue-600 dark:text-blue-400'
+                    : 'text-green-600 dark:text-green-400'
+                }`}>
+                  {isTimefreeMode ? 'Listening' : 'Now Playing'}
+                </span>
+              </div>
+              <p className="text-sm font-medium truncate leading-tight">{song.title}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 truncate leading-tight">{song.artist}</p>
             </div>
-          )}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1">
-              <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse flex-shrink-0" />
-              <span className="text-[10px] font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide">
-                Now Playing
-              </span>
-            </div>
-            <p className="text-sm font-medium truncate leading-tight">{latestSong.title}</p>
-            <p className="text-xs text-gray-500 dark:text-gray-400 truncate leading-tight">{latestSong.artist}</p>
+            {(song.itunes || song.amazon) && (
+              <div className="flex gap-1 flex-shrink-0">
+                {song.itunes && (
+                  <a href={song.itunes} target="_blank" rel="noopener noreferrer"
+                    className="w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center rounded-full bg-white/80 dark:bg-gray-800 hover:bg-pink-50 dark:hover:bg-pink-900/30 transition-colors shadow-sm"
+                    title="Apple Music">
+                    <svg className="w-3.5 h-3.5 text-pink-500" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" /></svg>
+                  </a>
+                )}
+                {song.amazon && (
+                  <a href={song.amazon} target="_blank" rel="noopener noreferrer"
+                    className="w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center rounded-full bg-white/80 dark:bg-gray-800 hover:bg-orange-50 dark:hover:bg-orange-900/30 transition-colors shadow-sm"
+                    title="Amazon">
+                    <svg className="w-3.5 h-3.5 text-orange-500" viewBox="0 0 24 24" fill="currentColor"><path d="M1 16c3.04 2.19 7.4 3.5 12 3.5 3.2 0 6.7-.7 9.6-2.1.5-.2.9.3.5.7C20.3 20.4 16.5 22 12 22 7.3 22 3.1 20.2.4 17.2c-.3-.4.1-.8.6-.5z" /></svg>
+                  </a>
+                )}
+              </div>
+            )}
           </div>
-          {(latestSong.itunes || latestSong.amazon) && (
-            <div className="flex gap-1 flex-shrink-0">
-              {latestSong.itunes && (
-                <a href={latestSong.itunes} target="_blank" rel="noopener noreferrer"
-                  className="w-7 h-7 flex items-center justify-center rounded-full bg-white/80 dark:bg-gray-800 hover:bg-pink-50 dark:hover:bg-pink-900/30 transition-colors shadow-sm"
-                  title="Apple Music">
-                  <svg className="w-3.5 h-3.5 text-pink-500" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" /></svg>
-                </a>
-              )}
-              {latestSong.amazon && (
-                <a href={latestSong.amazon} target="_blank" rel="noopener noreferrer"
-                  className="w-7 h-7 flex items-center justify-center rounded-full bg-white/80 dark:bg-gray-800 hover:bg-orange-50 dark:hover:bg-orange-900/30 transition-colors shadow-sm"
-                  title="Amazon">
-                  <svg className="w-3.5 h-3.5 text-orange-500" viewBox="0 0 24 24" fill="currentColor"><path d="M1 16c3.04 2.19 7.4 3.5 12 3.5 3.2 0 6.7-.7 9.6-2.1.5-.2.9.3.5.7C20.3 20.4 16.5 22 12 22 7.3 22 3.1 20.2.4 17.2c-.3-.4.1-.8.6-.5z" /></svg>
-                </a>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+        );
+      })()}
 
       {/* Divider */}
       <div className="border-t border-gray-200 dark:border-gray-700" />
@@ -292,23 +349,23 @@ function ProgramDetail({
       {program ? (
         <div className="flex flex-col gap-4">
           {/* Program header: image + info */}
-          <div className="flex gap-4">
+          <div className="flex gap-3 sm:gap-4">
             {program.imageUrl ? (
               <img
                 src={program.imageUrl}
                 alt=""
-                className="w-24 h-24 sm:w-32 sm:h-32 rounded-lg object-cover flex-shrink-0 bg-gray-100 dark:bg-gray-800"
+                className="w-20 h-20 sm:w-24 sm:h-24 md:w-32 md:h-32 rounded-lg object-cover flex-shrink-0 bg-gray-100 dark:bg-gray-800"
               />
             ) : (
-              <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-lg flex-shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
-                <svg className="w-10 h-10 text-gray-300 dark:text-gray-600" viewBox="0 0 24 24" fill="currentColor">
+              <div className="w-20 h-20 sm:w-24 sm:h-24 md:w-32 md:h-32 rounded-lg flex-shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
+                <svg className="w-8 h-8 sm:w-10 sm:h-10 text-gray-300 dark:text-gray-600" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM8 15l2.5-3.21 1.79 2.15 2.5-3.22L19 15H5l3 0z" />
                 </svg>
               </div>
             )}
             <div className="flex-1 min-w-0 flex flex-col gap-1.5">
               <div className="flex items-start gap-2">
-                <h2 className="text-lg font-bold leading-tight flex-1">{program.title}</h2>
+                <h2 className="text-base sm:text-lg font-bold leading-tight flex-1">{program.title}</h2>
                 {program.isOnAir && (
                   <span className="text-[10px] font-bold bg-red-500 text-white px-1.5 py-0.5 rounded flex-shrink-0 mt-0.5">
                     LIVE
@@ -441,7 +498,7 @@ function ScheduleList({
           <div
             key={program.id}
             ref={program.isOnAir && isToday ? onAirRef : undefined}
-            className={`flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors border-l-2 ${
+            className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-2 cursor-pointer transition-colors border-l-2 ${
               isSelected
                 ? 'border-l-blue-500 bg-blue-50 dark:bg-blue-950/20'
                 : program.isOnAir
@@ -453,7 +510,7 @@ function ScheduleList({
             onClick={() => onSelectProgram(program)}
           >
             {/* Time */}
-            <div className="flex-shrink-0 w-10 text-center">
+            <div className="flex-shrink-0 w-9 sm:w-10 text-center">
               <span className="text-[11px] font-mono text-gray-500 dark:text-gray-400 leading-none">
                 {formatTime(program.startTime)}
               </span>
@@ -477,14 +534,14 @@ function ScheduleList({
               {program.isTimefree && (
                 <button
                   onClick={(e) => { e.stopPropagation(); onPlayTimefree(program); }}
-                  className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors ${
+                  className={`w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center rounded-full transition-colors ${
                     isNowPlaying
                       ? 'bg-blue-500 text-white'
                       : 'text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30'
                   }`}
                   title="Play timefree"
                 >
-                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+                  <svg className="w-2.5 h-2.5 sm:w-3 sm:h-3" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M8 5v14l11-7z" />
                   </svg>
                 </button>
@@ -574,7 +631,7 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
   const [noaItems, setNoaItems] = useState<NoaItem[]>([]);
   const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const { playLive, playTimefree, currentInfo, isPlaying } = usePlayer();
+  const { playLive, playTimefree, currentInfo, isPlaying, currentTime: playerCurrentTime, isBehindLive } = usePlayer();
 
   const scheduleRef = useRef<HTMLDivElement>(null);
   const onAirRef = useRef<HTMLDivElement>(null);
@@ -619,7 +676,41 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
     return () => { active = false; clearInterval(interval); };
   }, [stationId]);
 
-  // Auto-scroll to on-air program in schedule
+  // Fetch song list for the currently playing timefree/behind-live program
+  const [playingSongs, setPlayingSongs] = useState<NoaItem[]>([]);
+  const playingSongsFtRef = useRef<string>('');
+  useEffect(() => {
+    const ft = currentInfo?.ft;
+    const to = currentInfo?.to;
+    const isTimefreePlaying = currentInfo?.stationId === stationId && isPlaying &&
+      (currentInfo?.type === 'timefree' || (currentInfo?.type === 'live' && isBehindLive));
+    if (!isTimefreePlaying || !ft || !to) {
+      setPlayingSongs([]);
+      playingSongsFtRef.current = '';
+      return;
+    }
+    // Only re-fetch when ft changes (new program)
+    if (playingSongsFtRef.current === ft) return;
+    playingSongsFtRef.current = ft;
+    let active = true;
+    fetch(`/api/noa?stationId=${stationId}&ft=${ft}&to=${to}`)
+      .then((r) => r.json())
+      .then((d) => { if (active) setPlayingSongs(d.items || []); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [stationId, currentInfo, isPlaying, isBehindLive]);
+
+  // Derive the currently playing song based on playback position
+  const nowPlayingSong = useMemo(() => {
+    const ft = currentInfo?.ft;
+    if (!ft || !playingSongs.length) return null;
+    const isTimefreePlaying = currentInfo?.stationId === stationId && isPlaying &&
+      (currentInfo?.type === 'timefree' || (currentInfo?.type === 'live' && isBehindLive));
+    if (!isTimefreePlaying) return null;
+    return findSongAtTime(playingSongs, ft, playerCurrentTime);
+  }, [playingSongs, currentInfo, stationId, isPlaying, isBehindLive, playerCurrentTime]);
+
+  // Auto-scroll to on-air program in schedule (centered)
   useEffect(() => {
     if (loading || hasScrolledRef.current) return;
     if (selectedDate !== todayStr) return;
@@ -629,8 +720,9 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
         const target = onAirRef.current;
         const containerRect = container.getBoundingClientRect();
         const targetRect = target.getBoundingClientRect();
+        const offset = targetRect.top - containerRect.top - containerRect.height / 2 + targetRect.height / 2;
         container.scrollTo({
-          top: container.scrollTop + (targetRect.top - containerRect.top) - 8,
+          top: container.scrollTop + offset,
           behavior: 'smooth',
         });
         hasScrolledRef.current = true;
@@ -638,6 +730,38 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
     }, 100);
     return () => clearTimeout(timer);
   }, [loading, selectedDate, todayStr]);
+
+  // Auto-update on-air status every 60s
+  useEffect(() => {
+    if (selectedDate !== todayStr || !data) return;
+    const interval = setInterval(() => {
+      const now = new Date();
+      const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+      const nowStr =
+        jst.getUTCFullYear().toString() +
+        String(jst.getUTCMonth() + 1).padStart(2, '0') +
+        String(jst.getUTCDate()).padStart(2, '0') +
+        String(jst.getUTCHours()).padStart(2, '0') +
+        String(jst.getUTCMinutes()).padStart(2, '0') +
+        String(jst.getUTCSeconds()).padStart(2, '0');
+
+      let changed = false;
+      const updated = data.programs.map((p) => {
+        const isOnAir = p.startTime <= nowStr && nowStr < p.endTime;
+        if (isOnAir !== p.isOnAir) changed = true;
+        return { ...p, isOnAir };
+      });
+      if (changed) {
+        setData({ ...data, programs: updated });
+        // Update selected program to new on-air if current selection was on-air
+        const newOnAir = updated.find((p) => p.isOnAir);
+        if (newOnAir) {
+          setSelectedProgramId(newOnAir.id);
+        }
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [selectedDate, todayStr, data]);
 
   const handlePlayLive = useCallback(() => {
     if (!data) return;
@@ -649,6 +773,8 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
       type: 'live',
       title: onAir?.title || `${data.station.name} Live`,
       performer: onAir?.performer || data.station.name,
+      ft: onAir?.startTime,
+      to: onAir?.endTime,
     });
   }, [data, playLive]);
 
@@ -683,8 +809,8 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
   // Date selector + schedule list (shared between sidebar and drawer)
   const scheduleContent = (
     <>
-      {/* Date selector */}
-      <div className="px-3 py-2 overflow-x-auto scrollbar-none border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+      {/* Date selector - sticky */}
+      <div className="px-3 py-2 overflow-x-auto scrollbar-none border-b border-gray-200 dark:border-gray-700 flex-shrink-0 sticky top-0 z-10 bg-white dark:bg-gray-900">
         <div className="flex gap-1 min-w-max">
           {dates.map((d) => (
             <button
@@ -729,14 +855,15 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
 
   return (
     <>
-      <div className="flex gap-0 lg:gap-6 h-[calc(100vh-3.5rem-4.5rem)]">
+      <div className="flex flex-1 min-h-0 gap-0 lg:gap-6">
         {/* === Left: Program detail (main area) === */}
-        <div className="flex-1 min-w-0 overflow-y-auto pb-24 pr-0 lg:pr-2">
+        <div className="flex-1 min-w-0 overflow-y-auto pb-20 pr-0 lg:pr-2 pt-2">
           <ProgramDetail
             program={selectedProgram}
             station={data?.station || null}
             stationId={stationId}
             noaItems={noaItems}
+            nowPlayingSong={nowPlayingSong}
             isStationLive={isStationLive}
             onPlayLive={handlePlayLive}
             onPlayTimefree={handlePlayTimefree}
@@ -746,7 +873,7 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
         </div>
 
         {/* === Right: Schedule sidebar (desktop only) === */}
-        <div className="hidden lg:flex flex-col w-80 xl:w-96 flex-shrink-0 border-l border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div className="hidden lg:flex flex-col w-80 xl:w-96 flex-shrink-0 border-l border-gray-200 dark:border-gray-700 overflow-hidden pb-20">
           <div ref={scheduleRef} className="flex-1 overflow-y-auto min-h-0">
             {scheduleContent}
           </div>
@@ -756,7 +883,7 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
       {/* === Mobile: Floating schedule button === */}
       <button
         onClick={() => setDrawerOpen(true)}
-        className="lg:hidden fixed bottom-20 right-4 z-40 w-12 h-12 bg-blue-500 text-white rounded-full shadow-lg flex items-center justify-center hover:bg-blue-600 active:bg-blue-700 transition-colors"
+        className="lg:hidden fixed bottom-24 right-3 sm:right-4 z-40 w-11 h-11 sm:w-12 sm:h-12 bg-blue-500 text-white rounded-full shadow-lg flex items-center justify-center hover:bg-blue-600 active:bg-blue-700 transition-colors"
         aria-label="Open schedule"
       >
         <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">

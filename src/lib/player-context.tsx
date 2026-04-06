@@ -34,7 +34,7 @@ export interface PlaybackInfo {
   type: 'live' | 'timefree';
   title: string;
   performer: string;
-  // For timefree
+  // For timefree, and also for live (current program boundaries)
   ft?: string;
   to?: string;
   duration?: number; // total duration in seconds
@@ -48,12 +48,18 @@ interface PlayerContextType {
   currentTime: number;
   duration: number;
   error: string | null;
+  // Live seek-back: when true, we're playing timefree behind the live edge
+  isBehindLive: boolean;
+  // Live elapsed: seconds since program start (real-time, ticks every second)
+  liveElapsed: number;
   playLive: (info: PlaybackInfo) => Promise<void>;
   playTimefree: (info: PlaybackInfo) => Promise<void>;
   pause: () => void;
   resume: () => void;
   setVolume: (v: number) => void;
   seek: (time: number) => void;
+  seekLive: (time: number) => void;
+  backToLive: () => void;
   skipForward: () => void;
   skipBackward: () => void;
 }
@@ -89,9 +95,31 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   // When paused, store the logical time to resume from (-1 = not paused)
   const pausedAtRef = useRef<number>(-1);
   const [error, setError] = useState<string | null>(null);
+  // Live seek-back state: true when playing timefree behind the live edge
+  const [isBehindLive, setIsBehindLive] = useState(false);
+  const isBehindLiveRef = useRef(false);
+  // Live elapsed: seconds since program ft (real-time clock)
+  const [liveElapsed, setLiveElapsed] = useState(0);
+  const liveElapsedRef = useRef(0);
 
   // Keep refs in sync with state
   useEffect(() => { currentInfoRef.current = currentInfo; }, [currentInfo]);
+  useEffect(() => { isBehindLiveRef.current = isBehindLive; }, [isBehindLive]);
+  useEffect(() => { liveElapsedRef.current = liveElapsed; }, [liveElapsed]);
+
+  // Tick liveElapsed every second for live mode
+  useEffect(() => {
+    if (!currentInfo || currentInfo.type !== 'live' || !currentInfo.ft) return;
+    if (isBehindLive) return; // Don't tick when behind live
+    const ftDate = parseRadikoDate(currentInfo.ft);
+    const tick = () => {
+      const elapsed = (Date.now() - ftDate.getTime()) / 1000;
+      setLiveElapsed(Math.max(0, elapsed));
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [currentInfo, isBehindLive]);
 
   // Ensure audio element exists
   useEffect(() => {
@@ -189,6 +217,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setError(null);
       setIsLoading(true);
       setCurrentInfo(info);
+      setIsBehindLive(false);
       seekOffsetRef.current = seekOffset;
       currentTimeRef.current = seekOffset;
       setCurrentTime(seekOffset);
@@ -199,7 +228,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setDuration(info.duration);
       } else {
         knownDurationRef.current = 0;
-        seekOffsetRef.current = 0;
         setDuration(0);
       }
 
@@ -348,7 +376,30 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     (async () => {
       try {
-        if (info.type === 'live') {
+        if (info.type === 'live' && isBehindLiveRef.current && info.ft) {
+          // Behind live: resume via timefree seek-back
+          const toDate = new Date(Date.now());
+          const toStr = formatDateToRadiko(toDate);
+          const ftDate = parseRadikoDate(info.ft);
+          const seekDate = new Date(ftDate.getTime() + pausedAt * 1000);
+          const seekStr = formatDateToRadiko(seekDate);
+          const params = new URLSearchParams({
+            stationId: info.stationId,
+            ft: info.ft,
+            to: toStr,
+            seek: seekStr,
+          });
+          const res = await fetch(`/api/stream/timefree?${params}`);
+          if (seekIdRef.current !== thisSeekId) return;
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+          const proxyParams = new URLSearchParams({ url: btoa(data.playlistUrl) });
+          if (data.areaId) proxyParams.set('areaId', data.areaId);
+          const proxyUrl = `/api/stream/proxy?${proxyParams}`;
+          if (seekIdRef.current !== thisSeekId) return;
+          await loadHlsStream(proxyUrl, info, pausedAt);
+          setIsBehindLive(true);
+        } else if (info.type === 'live') {
           const proxyUrl = await fetchLiveProxyUrl(info);
           if (seekIdRef.current !== thisSeekId) return;
           await loadHlsStream(proxyUrl, info);
@@ -429,17 +480,127 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     [loadHlsStream]
   );
 
+  // Seek within a live program (seek-back via timefree)
+  // time = seconds since program ft
+  const seekLive = useCallback(
+    (time: number) => {
+      const info = currentInfoRef.current;
+      if (!info || !info.ft) return;
+      const ftDate = parseRadikoDate(info.ft);
+      const nowElapsed = (Date.now() - ftDate.getTime()) / 1000;
+      const clampedTime = Math.max(0, Math.min(time, nowElapsed));
+
+      // If seeking close to the live edge (within 5s), go back to live
+      if (clampedTime >= nowElapsed - 5) {
+        // Inline back-to-live logic to avoid circular dependency
+        setIsBehindLive(false);
+        const thisSeekId = ++seekIdRef.current;
+        setIsLoading(true);
+        (async () => {
+          try {
+            const proxyUrl = await fetchLiveProxyUrl(info);
+            if (seekIdRef.current !== thisSeekId) return;
+            await loadHlsStream(proxyUrl, { ...info, type: 'live' });
+          } catch (e) {
+            if (seekIdRef.current !== thisSeekId) return;
+            setError(e instanceof Error ? e.message : 'Failed to resume live');
+            setIsLoading(false);
+          }
+        })();
+        return;
+      }
+
+      // Build a "to" that is "now" so timefree API works for the current program
+      const toDate = new Date(Date.now());
+      const toStr = formatDateToRadiko(toDate);
+      const thisSeekId = ++seekIdRef.current;
+
+      currentTimeRef.current = clampedTime;
+      setCurrentTime(clampedTime);
+      setIsLoading(true);
+      setIsBehindLive(true);
+      pausedAtRef.current = -1;
+
+      (async () => {
+        try {
+          const seekDate = new Date(ftDate.getTime() + clampedTime * 1000);
+          const seekStr = formatDateToRadiko(seekDate);
+          const params = new URLSearchParams({
+            stationId: info.stationId,
+            ft: info.ft!,
+            to: toStr,
+            seek: seekStr,
+          });
+          const res = await fetch(`/api/stream/timefree?${params}`);
+          if (seekIdRef.current !== thisSeekId) return;
+
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+
+          const proxyParams = new URLSearchParams({ url: btoa(data.playlistUrl) });
+          if (data.areaId) proxyParams.set('areaId', data.areaId);
+          const proxyUrl = `/api/stream/proxy?${proxyParams}`;
+          if (seekIdRef.current !== thisSeekId) return;
+
+          // Load as the original live info (keep type=live), but set seekOffset
+          const liveInfo = { ...info, type: 'live' as const };
+          await loadHlsStream(proxyUrl, liveInfo, clampedTime);
+          // Re-set isBehindLive after loadHlsStream (which resets it to false)
+          setIsBehindLive(true);
+        } catch (e) {
+          if (seekIdRef.current !== thisSeekId) return;
+          setError(e instanceof Error ? e.message : 'Seek failed');
+          setIsLoading(false);
+        }
+      })();
+    },
+    [fetchLiveProxyUrl, loadHlsStream]
+  );
+
+  // Back to live edge: re-request the live stream
+  const backToLive = useCallback(() => {
+    const info = currentInfoRef.current;
+    if (!info) return;
+    setIsBehindLive(false);
+    const thisSeekId = ++seekIdRef.current;
+    setIsLoading(true);
+
+    (async () => {
+      try {
+        const proxyUrl = await fetchLiveProxyUrl(info);
+        if (seekIdRef.current !== thisSeekId) return;
+        await loadHlsStream(proxyUrl, { ...info, type: 'live' });
+      } catch (e) {
+        if (seekIdRef.current !== thisSeekId) return;
+        setError(e instanceof Error ? e.message : 'Failed to resume live');
+        setIsLoading(false);
+      }
+    })();
+  }, [fetchLiveProxyUrl, loadHlsStream]);
+
   const skipForward = useCallback(() => {
     const info = currentInfoRef.current;
-    if (!info || info.type === 'live') return;
+    if (!info) return;
+    if (info.type === 'live' && !isBehindLiveRef.current) return;
+    if (info.type === 'live' && isBehindLiveRef.current) {
+      seekLive(currentTimeRef.current + SKIP_SECONDS);
+      return;
+    }
     seek(currentTimeRef.current + SKIP_SECONDS);
-  }, [seek]);
+  }, [seek, seekLive]);
 
   const skipBackward = useCallback(() => {
     const info = currentInfoRef.current;
-    if (!info || info.type === 'live') return;
+    if (!info) return;
+    if (info.type === 'live') {
+      // When not behind live, currentTimeRef is the HLS audio.currentTime (small number),
+      // not the offset from program start. Use liveElapsedRef instead.
+      const pos = isBehindLiveRef.current ? currentTimeRef.current : liveElapsedRef.current;
+      seekLive(pos - SKIP_SECONDS);
+      return;
+    }
     seek(currentTimeRef.current - SKIP_SECONDS);
-  }, [seek]);
+  }, [seek, seekLive]);
 
   // Media Session handlers
   useEffect(() => {
@@ -466,12 +627,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         currentTime,
         duration,
         error,
+        isBehindLive,
+        liveElapsed,
         playLive,
         playTimefree,
         pause,
         resume,
         setVolume,
         seek,
+        seekLive,
+        backToLive,
         skipForward,
         skipBackward,
       }}

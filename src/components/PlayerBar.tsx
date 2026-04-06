@@ -26,9 +26,23 @@ function absoluteTime(ft: string, offsetSeconds: number): string {
   return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-const TOUCH_DRAG_THRESHOLD = 5;
+// --- Icons ---
 
-// Skip backward icon (circular arrow with "10" inside)
+// Check if a program end time (YYYYMMDDHHmmss JST) is in the future (program still airing)
+function isOnAirProgram(to?: string): boolean {
+  if (!to || to.length < 14) return false;
+  const now = new Date();
+  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const nowStr =
+    jst.getUTCFullYear().toString() +
+    String(jst.getUTCMonth() + 1).padStart(2, '0') +
+    String(jst.getUTCDate()).padStart(2, '0') +
+    String(jst.getUTCHours()).padStart(2, '0') +
+    String(jst.getUTCMinutes()).padStart(2, '0') +
+    String(jst.getUTCSeconds()).padStart(2, '0');
+  return nowStr < to;
+}
+
 function SkipBackIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="currentColor">
@@ -38,7 +52,6 @@ function SkipBackIcon({ className }: { className?: string }) {
   );
 }
 
-// Skip forward icon (circular arrow with "10" inside)
 function SkipForwardIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="currentColor">
@@ -48,7 +61,207 @@ function SkipForwardIcon({ className }: { className?: string }) {
   );
 }
 
-// Custom volume slider with fill, hover expand, and drag support
+// --- Unified progress/seek bar ---
+
+function ProgressBar({
+  currentTime,
+  totalDuration,
+  accentColor,
+  ft,
+  onSeek,
+  hideEndTime,
+}: {
+  currentTime: number;
+  totalDuration: number;
+  accentColor: string; // CSS color value, e.g. "#3b82f6"
+  ft?: string;
+  onSeek: (time: number) => void;
+  hideEndTime?: boolean;
+}) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef(false);
+  const [interacting, setInteracting] = useState(false); // hover or drag
+  const [dragging, setDragging] = useState(false);
+  const [dragRatio, setDragRatio] = useState(0);
+  const [hoverRatio, setHoverRatio] = useState(0);
+  const dragRatioRef = useRef(0);
+
+  // Touch relative-drag refs
+  const touchStartXRef = useRef(0);
+  const touchStartRatioRef = useRef(0);
+  const touchMovedRef = useRef(false);
+
+  const getRatioFromClientX = useCallback((clientX: number): number => {
+    const track = trackRef.current;
+    if (!track) return 0;
+    const rect = track.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  }, []);
+
+  const commitSeek = useCallback((ratio: number) => {
+    onSeek(ratio * totalDuration);
+  }, [onSeek, totalDuration]);
+
+  // Mouse events on window
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!draggingRef.current) return;
+      const r = getRatioFromClientX(e.clientX);
+      dragRatioRef.current = r;
+      setDragRatio(r);
+    };
+    const onMouseUp = (e: MouseEvent) => {
+      if (!draggingRef.current) return;
+      draggingRef.current = false;
+      setDragging(false);
+      const r = getRatioFromClientX(e.clientX);
+      commitSeek(r);
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [getRatioFromClientX, commitSeek]);
+
+  // Touch events on window
+  useEffect(() => {
+    const onTouchMove = (e: TouchEvent) => {
+      if (!draggingRef.current) return;
+      const touch = e.touches[0];
+      if (!touch) return;
+      e.preventDefault();
+      const deltaX = touch.clientX - touchStartXRef.current;
+      const track = trackRef.current;
+      if (!track) return;
+      const trackW = track.getBoundingClientRect().width;
+      if (!touchMovedRef.current && Math.abs(deltaX) >= 5) {
+        touchMovedRef.current = true;
+      }
+      let r: number;
+      if (touchMovedRef.current) {
+        r = Math.max(0, Math.min(1, touchStartRatioRef.current + deltaX / trackW));
+      } else {
+        r = getRatioFromClientX(touch.clientX);
+      }
+      dragRatioRef.current = r;
+      setDragRatio(r);
+    };
+    const onTouchEnd = () => {
+      if (!draggingRef.current) return;
+      draggingRef.current = false;
+      setDragging(false);
+      commitSeek(dragRatioRef.current);
+    };
+    window.addEventListener('touchmove', onTouchMove, { passive: false });
+    window.addEventListener('touchend', onTouchEnd);
+    window.addEventListener('touchcancel', onTouchEnd);
+    return () => {
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onTouchEnd);
+      window.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, [getRatioFromClientX, commitSeek]);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const r = getRatioFromClientX(e.clientX);
+    draggingRef.current = true;
+    dragRatioRef.current = r;
+    setDragging(true);
+    setDragRatio(r);
+  }, [getRatioFromClientX]);
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    if (!touch) return;
+    const r = getRatioFromClientX(touch.clientX);
+    touchStartXRef.current = touch.clientX;
+    touchStartRatioRef.current = totalDuration > 0 ? currentTime / totalDuration : 0;
+    touchMovedRef.current = false;
+    draggingRef.current = true;
+    dragRatioRef.current = r;
+    setDragging(true);
+    setDragRatio(r);
+  }, [getRatioFromClientX, totalDuration, currentTime]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (draggingRef.current) return; // window handler takes over during drag
+    setHoverRatio(getRatioFromClientX(e.clientX));
+  }, [getRatioFromClientX]);
+
+  const playRatio = totalDuration > 0 ? currentTime / totalDuration : 0;
+  const displayRatio = dragging ? dragRatio : playRatio;
+  const displayTime = dragging ? dragRatio * totalDuration : currentTime;
+  const tooltipRatio = dragging ? dragRatio : hoverRatio;
+  const tooltipTime = tooltipRatio * totalDuration;
+
+  return (
+    <div className="flex items-center gap-1.5 sm:gap-3 w-full">
+      {/* Elapsed time */}
+      <span className="text-[11px] font-mono text-gray-400 w-14 text-right flex-shrink-0 select-none tabular-nums">
+        {ft ? absoluteTime(ft, displayTime) : formatSeconds(displayTime)}
+      </span>
+
+      {/* Track container: tall hit area, thin visible track */}
+      <div
+        ref={trackRef}
+        className="relative flex-1 h-5 flex items-center cursor-pointer touch-none group"
+        onMouseDown={handleMouseDown}
+        onTouchStart={handleTouchStart}
+        onMouseMove={handleMouseMove}
+        onMouseEnter={() => setInteracting(true)}
+        onMouseLeave={() => { if (!draggingRef.current) setInteracting(false); }}
+      >
+        {/* Track background */}
+        <div className={`w-full rounded-full bg-gray-600/80 transition-[height] duration-150 ${
+          interacting || dragging ? 'h-1.5' : 'h-1'
+        }`}>
+          {/* Fill */}
+          <div
+            className="h-full rounded-full transition-[width] duration-100"
+            style={{ width: `${displayRatio * 100}%`, backgroundColor: accentColor }}
+          />
+        </div>
+
+        {/* Thumb */}
+        <div
+          className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 rounded-full transition-[width,height,opacity] duration-150 shadow-sm ${
+            interacting || dragging
+              ? 'w-3.5 h-3.5 opacity-100'
+              : 'w-2.5 h-2.5 opacity-80'
+          }`}
+          style={{ left: `${displayRatio * 100}%`, backgroundColor: accentColor }}
+        />
+
+        {/* Hover/drag tooltip */}
+        {(interacting || dragging) && ft && (
+          <div
+            className="absolute bottom-full mb-2 -translate-x-1/2 pointer-events-none"
+            style={{ left: `${tooltipRatio * 100}%` }}
+          >
+            <div className="bg-gray-800 text-white text-[11px] font-mono px-2 py-0.5 rounded shadow-lg whitespace-nowrap border border-gray-600/50">
+              {absoluteTime(ft, tooltipTime)}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Total / end time */}
+      {hideEndTime ? (
+        <span className="w-14 flex-shrink-0" />
+      ) : (
+        <span className="text-[11px] font-mono text-gray-400 w-14 text-left flex-shrink-0 select-none tabular-nums">
+          {ft ? absoluteTime(ft, totalDuration) : formatSeconds(totalDuration)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// --- Volume slider ---
+
 function VolumeSlider({ volume, onVolumeChange }: { volume: number; onVolumeChange: (v: number) => void }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
@@ -63,7 +276,6 @@ function VolumeSlider({ volume, onVolumeChange }: { volume: number; onVolumeChan
     return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
   }, [volume]);
 
-  // Mouse drag
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       if (!draggingRef.current) return;
@@ -127,8 +339,6 @@ function VolumeSlider({ volume, onVolumeChange }: { volume: number; onVolumeChan
           </svg>
         )}
       </button>
-
-      {/* Custom track */}
       <div
         ref={trackRef}
         className="w-20 h-6 flex items-center cursor-pointer"
@@ -140,12 +350,10 @@ function VolumeSlider({ volume, onVolumeChange }: { volume: number; onVolumeChan
         aria-valuemax={100}
       >
         <div className="relative w-full h-1 rounded-full bg-gray-600">
-          {/* Filled portion */}
           <div
             className={`absolute left-0 top-0 h-full rounded-full transition-colors ${active ? 'bg-white' : 'bg-gray-400'}`}
             style={{ width: pct }}
           />
-          {/* Thumb */}
           <div
             className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-white shadow transition-opacity ${active ? 'opacity-100' : 'opacity-0'}`}
             style={{ left: pct }}
@@ -156,6 +364,8 @@ function VolumeSlider({ volume, onVolumeChange }: { volume: number; onVolumeChan
   );
 }
 
+// --- Main player bar ---
+
 export default function PlayerBar() {
   const {
     isPlaying,
@@ -165,293 +375,161 @@ export default function PlayerBar() {
     currentTime,
     duration,
     error,
+    isBehindLive,
+    liveElapsed,
     pause,
     resume,
     setVolume,
     seek,
+    seekLive,
+    backToLive,
     skipForward,
     skipBackward,
   } = usePlayer();
 
-  const progressRef = useRef<HTMLDivElement>(null);
-
-  // --- Shared drag state (mouse + touch) ---
-  const draggingRef = useRef(false);
-  const dragTimeRef = useRef(0);
-  const dragXRef = useRef(0);
-  const [dragging, setDragging] = useState(false);
-  const [dragTime, setDragTime] = useState(0);
-  const [dragX, setDragX] = useState(0);
-
-  // --- Touch-specific refs for YouTube-style relative drag ---
-  const touchStartXRef = useRef(0);
-  const touchStartTimeRef = useRef(0);
-  const touchMovedRef = useRef(false);
-
-  const getTimeFromClientX = useCallback(
-    (clientX: number): number | null => {
-      const bar = progressRef.current;
-      if (!bar || !duration) return null;
-      const rect = bar.getBoundingClientRect();
-      const x = clientX - rect.left;
-      const ratio = Math.max(0, Math.min(1, x / rect.width));
-      return ratio * duration;
-    },
-    [duration]
-  );
-
-  const getClampedX = useCallback((clientX: number): number => {
-    const bar = progressRef.current;
-    if (!bar) return 0;
-    const rect = bar.getBoundingClientRect();
-    return Math.max(0, Math.min(clientX - rect.left, rect.width));
-  }, []);
-
-  const pxToTimeDelta = useCallback(
-    (px: number): number => {
-      const bar = progressRef.current;
-      if (!bar || !duration) return 0;
-      return (px / bar.getBoundingClientRect().width) * duration;
-    },
-    [duration]
-  );
-
-  const updateDragPreview = useCallback((time: number, x: number) => {
-    const clamped = Math.max(0, time);
-    dragTimeRef.current = clamped;
-    dragXRef.current = x;
-    setDragTime(clamped);
-    setDragX(x);
-  }, []);
-
-  // Mouse events (PC)
-  useEffect(() => {
-    const onMouseMove = (e: MouseEvent) => {
-      if (!draggingRef.current) return;
-      const time = getTimeFromClientX(e.clientX);
-      if (time !== null) {
-        updateDragPreview(time, getClampedX(e.clientX));
-      }
-    };
-    const onMouseUp = (e: MouseEvent) => {
-      if (!draggingRef.current) return;
-      draggingRef.current = false;
-      setDragging(false);
-      const time = getTimeFromClientX(e.clientX);
-      seek(time ?? dragTimeRef.current);
-    };
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-    };
-  }, [getTimeFromClientX, getClampedX, updateDragPreview, seek]);
-
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!currentInfo || currentInfo.type === 'live') return;
-      const time = getTimeFromClientX(e.clientX);
-      if (time === null) return;
-      e.preventDefault();
-      draggingRef.current = true;
-      setDragging(true);
-      updateDragPreview(time, getClampedX(e.clientX));
-    },
-    [currentInfo, getTimeFromClientX, getClampedX, updateDragPreview]
-  );
-
-  // Touch events (Mobile)
-  const handleTouchStart = useCallback(
-    (e: React.TouchEvent<HTMLDivElement>) => {
-      if (!currentInfo || currentInfo.type === 'live') return;
-      const touch = e.touches[0];
-      if (!touch) return;
-      const time = getTimeFromClientX(touch.clientX);
-      if (time === null) return;
-      touchStartXRef.current = touch.clientX;
-      touchStartTimeRef.current = currentTime;
-      touchMovedRef.current = false;
-      draggingRef.current = true;
-      setDragging(true);
-      updateDragPreview(time, getClampedX(touch.clientX));
-    },
-    [currentInfo, currentTime, getTimeFromClientX, getClampedX, updateDragPreview]
-  );
-
-  useEffect(() => {
-    const bar = progressRef.current;
-    if (!bar) return;
-    const onTouchMove = (e: TouchEvent) => {
-      if (!draggingRef.current) return;
-      const touch = e.touches[0];
-      if (!touch) return;
-      e.preventDefault();
-      const deltaX = touch.clientX - touchStartXRef.current;
-      if (!touchMovedRef.current && Math.abs(deltaX) >= TOUCH_DRAG_THRESHOLD) {
-        touchMovedRef.current = true;
-      }
-      if (touchMovedRef.current) {
-        const timeDelta = pxToTimeDelta(deltaX);
-        const newTime = Math.max(0, Math.min(touchStartTimeRef.current + timeDelta, duration));
-        updateDragPreview(newTime, getClampedX(touch.clientX));
-      } else {
-        const time = getTimeFromClientX(touch.clientX);
-        if (time !== null) updateDragPreview(time, getClampedX(touch.clientX));
-      }
-    };
-    const onTouchEnd = () => {
-      if (!draggingRef.current) return;
-      draggingRef.current = false;
-      setDragging(false);
-      seek(dragTimeRef.current);
-    };
-    bar.addEventListener('touchmove', onTouchMove, { passive: false });
-    bar.addEventListener('touchend', onTouchEnd);
-    bar.addEventListener('touchcancel', onTouchEnd);
-    return () => {
-      bar.removeEventListener('touchmove', onTouchMove);
-      bar.removeEventListener('touchend', onTouchEnd);
-      bar.removeEventListener('touchcancel', onTouchEnd);
-    };
-  }, [duration, getTimeFromClientX, getClampedX, pxToTimeDelta, updateDragPreview, seek]);
-
   if (!currentInfo && !error) return null;
 
-  const displayTime = dragging ? dragTime : currentTime;
-  const progress = duration > 0 ? (displayTime / duration) * 100 : 0;
   const isTimefree = currentInfo?.type === 'timefree';
   const isLive = currentInfo?.type === 'live';
+  const hasLiveBar = isLive && !!currentInfo?.ft;
+
+  // Determine bar parameters
+  const barCurrentTime = isLive
+    ? (isBehindLive ? currentTime : liveElapsed)
+    : currentTime;
+  const barDuration = isLive ? liveElapsed : duration;
+  const barColor = isLive
+    ? (isBehindLive ? '#f97316' : '#ef4444') // orange-500 : red-500
+    : '#3b82f6'; // blue-500
+  const showBar = (isTimefree && duration > 0) || (hasLiveBar && liveElapsed > 0);
+  const handleSeek = isLive ? seekLive : seek;
+
+  // Hide end time for live (always growing) and timefree of still-airing programs
+  const barHideEndTime = isLive || (isTimefree && isOnAirProgram(currentInfo?.to));
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 bg-gray-900 text-white border-t border-gray-700 shadow-lg">
-      {/* Progress bar - only for timefree */}
-      {isTimefree && duration > 0 && (
-        <div
-          ref={progressRef}
-          className="h-2 bg-gray-700 cursor-pointer group relative touch-none"
-          onMouseDown={handleMouseDown}
-          onTouchStart={handleTouchStart}
-        >
-          <div
-            className="h-full bg-blue-500 transition-[width] duration-150 relative"
-            style={{ width: `${progress}%` }}
-          >
-            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
-          </div>
-          {dragging && (
-            <div
-              className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 bg-white rounded-full shadow-md pointer-events-none"
-              style={{ left: `${dragX}px` }}
+    <div className="fixed bottom-0 left-0 right-0 z-50 bg-gray-900 text-white shadow-lg">
+      {/* Live-only pulse bar when no ft available */}
+      {isLive && !hasLiveBar && (
+        <div className="h-0.5 bg-red-500 animate-pulse" />
+      )}
+
+      <div className="max-w-screen-xl mx-auto px-3 sm:px-4">
+        {/* Progress bar row */}
+        {showBar && (
+          <div className="pt-2">
+            <ProgressBar
+              currentTime={barCurrentTime}
+              totalDuration={barDuration}
+              accentColor={barColor}
+              ft={currentInfo?.ft}
+              onSeek={handleSeek}
+              hideEndTime={barHideEndTime}
             />
-          )}
-          {dragging && currentInfo?.ft && (
-            <div
-              className="absolute bottom-full mb-2 -translate-x-1/2 pointer-events-none"
-              style={{ left: `${dragX}px` }}
-            >
-              <div className="bg-gray-800 text-white text-xs font-mono px-2 py-1 rounded shadow-lg whitespace-nowrap border border-gray-600">
-                {absoluteTime(currentInfo.ft, dragTime)}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Live indicator bar */}
-      {isLive && (
-        <div className="h-1 bg-red-500 animate-pulse" />
-      )}
-
-      <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 sm:py-2.5 max-w-screen-xl mx-auto">
-        {/* Station logo */}
-        {currentInfo?.stationLogo && (
-          <img
-            src={currentInfo.stationLogo}
-            alt={currentInfo.stationName}
-            className="w-9 h-9 sm:w-10 sm:h-10 rounded object-contain bg-white flex-shrink-0"
-          />
+          </div>
         )}
 
-        {/* Info */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            {isLive && (
-              <span className="text-[10px] font-bold bg-red-600 text-white px-1.5 py-0.5 rounded flex-shrink-0">
-                LIVE
+        {/* Controls row */}
+        <div className="flex items-center gap-2 sm:gap-3 py-2 sm:py-2.5">
+          {/* Station logo */}
+          {currentInfo?.stationLogo && (
+            <img
+              src={currentInfo.stationLogo}
+              alt={currentInfo.stationName}
+              className="w-8 h-8 sm:w-10 sm:h-10 rounded object-contain bg-white flex-shrink-0"
+            />
+          )}
+
+          {/* Info */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              {isLive && !isBehindLive && (
+                <span className="text-[10px] font-bold bg-red-600 text-white px-1.5 py-0.5 rounded flex-shrink-0">
+                  LIVE
+                </span>
+              )}
+              {isLive && isBehindLive && (
+                <span className="text-[10px] font-bold bg-orange-500 text-white px-1.5 py-0.5 rounded flex-shrink-0">
+                  BEHIND
+                </span>
+              )}
+              {isTimefree && (
+                <span className="text-[10px] font-bold bg-blue-600 text-white px-1.5 py-0.5 rounded flex-shrink-0">
+                  TF
+                </span>
+              )}
+              <span className="text-sm font-medium truncate">
+                {currentInfo?.title || currentInfo?.stationName || 'Unknown'}
               </span>
-            )}
-            {isTimefree && (
-              <span className="text-[10px] font-bold bg-blue-600 text-white px-1.5 py-0.5 rounded flex-shrink-0">
-                TF
-              </span>
-            )}
-            <span className="text-sm font-medium truncate">
-              {currentInfo?.title || currentInfo?.stationName || 'Unknown'}
-            </span>
-          </div>
-          <div className="flex items-center gap-2 text-xs text-gray-400">
-            <span className="truncate">
+            </div>
+            <p className="text-xs text-gray-400 truncate">
               {currentInfo?.performer || currentInfo?.stationName}
-            </span>
-            {isTimefree && duration > 0 && (
-              <span className="flex-shrink-0 font-mono">
-                {formatSeconds(displayTime)} / {formatSeconds(duration)}
-              </span>
-            )}
+            </p>
+            {error && <p className="text-xs text-red-400 mt-0.5">{error}</p>}
           </div>
-          {error && <div className="text-xs text-red-400 mt-0.5">{error}</div>}
-        </div>
 
-        {/* Controls */}
-        <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0">
-          {/* Skip backward 10s (timefree only) */}
-          {isTimefree && (
-            <button
-              onClick={skipBackward}
-              className="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-full text-gray-300 hover:text-white hover:bg-gray-700 active:bg-gray-600 transition-colors"
-              aria-label="Back 10 seconds"
-            >
-              <SkipBackIcon className="w-5 h-5 sm:w-6 sm:h-6" />
-            </button>
-          )}
-
-          {/* Play/Pause */}
-          <button
-            onClick={isPlaying ? pause : resume}
-            disabled={isLoading && !isPlaying}
-            className="w-10 h-10 sm:w-11 sm:h-11 flex items-center justify-center rounded-full bg-white text-gray-900 hover:bg-gray-200 active:bg-gray-300 disabled:opacity-50 transition-colors"
-            aria-label={isPlaying ? 'Pause' : 'Play'}
-          >
-            {isLoading ? (
-              <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
-                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="31.4 31.4" />
-              </svg>
-            ) : isPlaying ? (
-              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                <rect x="6" y="4" width="4" height="16" rx="1" />
-                <rect x="14" y="4" width="4" height="16" rx="1" />
-              </svg>
-            ) : (
-              <svg className="w-5 h-5 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M8 5v14l11-7z" />
-              </svg>
+          {/* Controls */}
+          <div className="flex items-center gap-0.5 sm:gap-1.5 flex-shrink-0">
+            {/* Back to Live */}
+            {isLive && isBehindLive && (
+              <button
+                onClick={backToLive}
+                className="flex items-center gap-1 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-full text-[11px] sm:text-xs font-medium bg-red-600 text-white hover:bg-red-500 active:bg-red-700 transition-colors"
+                aria-label="Back to live"
+              >
+                <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
+                Live
+              </button>
             )}
-          </button>
 
-          {/* Skip forward 10s (timefree only) */}
-          {isTimefree && (
+            {/* Skip backward */}
+            {(isTimefree || hasLiveBar) && (
+              <button
+                onClick={skipBackward}
+                className="w-7 h-7 sm:w-9 sm:h-9 flex items-center justify-center rounded-full text-gray-300 hover:text-white hover:bg-gray-700 active:bg-gray-600 transition-colors"
+                aria-label="Back 10 seconds"
+              >
+                <SkipBackIcon className="w-5 h-5 sm:w-6 sm:h-6" />
+              </button>
+            )}
+
+            {/* Play/Pause */}
             <button
-              onClick={skipForward}
-              className="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-full text-gray-300 hover:text-white hover:bg-gray-700 active:bg-gray-600 transition-colors"
-              aria-label="Forward 10 seconds"
+              onClick={isPlaying ? pause : resume}
+              disabled={isLoading && !isPlaying}
+              className="w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center rounded-full bg-white text-gray-900 hover:bg-gray-200 active:bg-gray-300 disabled:opacity-50 transition-colors"
+              aria-label={isPlaying ? 'Pause' : 'Play'}
             >
-              <SkipForwardIcon className="w-5 h-5 sm:w-6 sm:h-6" />
+              {isLoading ? (
+                <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="31.4 31.4" />
+                </svg>
+              ) : isPlaying ? (
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="6" y="4" width="4" height="16" rx="1" />
+                  <rect x="14" y="4" width="4" height="16" rx="1" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              )}
             </button>
-          )}
 
-          {/* Volume (PC only) */}
-          <VolumeSlider volume={volume} onVolumeChange={setVolume} />
+            {/* Skip forward */}
+            {(isTimefree || (hasLiveBar && isBehindLive)) && (
+              <button
+                onClick={skipForward}
+                className="w-7 h-7 sm:w-9 sm:h-9 flex items-center justify-center rounded-full text-gray-300 hover:text-white hover:bg-gray-700 active:bg-gray-600 transition-colors"
+                aria-label="Forward 10 seconds"
+              >
+                <SkipForwardIcon className="w-5 h-5 sm:w-6 sm:h-6" />
+              </button>
+            )}
+
+            {/* Volume */}
+            <VolumeSlider volume={volume} onVolumeChange={setVolume} />
+          </div>
         </div>
       </div>
     </div>

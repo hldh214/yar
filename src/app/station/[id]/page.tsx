@@ -9,7 +9,7 @@ export default async function StationPage({
   const { id } = await params;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col flex-1 min-h-0 max-w-screen-xl mx-auto w-full px-4">
       <Link
         href="/"
         className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 py-1 flex-shrink-0"
