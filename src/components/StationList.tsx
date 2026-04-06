@@ -31,7 +31,7 @@ export default function StationList() {
   const [error, setError] = useState<string | null>(null);
   const [expandedRegion, setExpandedRegion] = useState<string | null>(null);
   const [frequentStations, setFrequentStations] = useState<StationRecord[]>([]);
-  const { playLive, currentInfo, isPlaying } = usePlayer();
+  const { playLive, pause, currentInfo, isPlaying } = usePlayer();
 
   // Load frequent stations from localStorage on mount
   useEffect(() => {
@@ -95,17 +95,54 @@ export default function StationList() {
   }, []);
 
   const handlePlayLive = useCallback(
-    (station: Station | StationRecord) => {
+    async (station: Station | StationRecord) => {
+      // Fetch current on-air program to get ft/to for progress bar & seek
+      let title = `${station.name} Live`;
+      let performer = station.name;
+      let ft: string | undefined;
+      let to: string | undefined;
+      try {
+        const res = await fetch(`/api/programs?stationId=${station.id}`);
+        const data = await res.json();
+        if (data.programs) {
+          const onAir = data.programs.find((p: { isOnAir: boolean }) => p.isOnAir);
+          if (onAir) {
+            title = onAir.title || title;
+            performer = onAir.performer || performer;
+            ft = onAir.startTime;
+            to = onAir.endTime;
+          }
+        }
+      } catch {
+        // Proceed without ft/to — player still works, just no progress bar
+      }
       playLive({
         stationId: station.id,
         stationName: station.name,
         stationLogo: station.logoUrl,
         type: 'live',
-        title: `${station.name} Live`,
-        performer: station.name,
+        title,
+        performer,
+        ft,
+        to,
       });
     },
     [playLive]
+  );
+
+  const handleTogglePlay = useCallback(
+    (station: Station | StationRecord) => {
+      const isCurrentLive =
+        currentInfo?.stationId === station.id &&
+        currentInfo?.type === 'live' &&
+        isPlaying;
+      if (isCurrentLive) {
+        pause();
+      } else {
+        handlePlayLive(station);
+      }
+    },
+    [currentInfo, isPlaying, pause, handlePlayLive]
   );
 
   const toggleRegion = useCallback((regionId: string) => {
@@ -177,13 +214,13 @@ export default function StationList() {
                     )}
                   </div>
                   <button
-                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); handlePlayLive(station); }}
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleTogglePlay(station); }}
                     className={`w-8 h-8 flex items-center justify-center rounded-full flex-shrink-0 transition-colors ${
                       isCurrentLive
                         ? 'bg-red-500 text-white'
                         : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-blue-500 hover:text-white'
                     }`}
-                    aria-label={`Play ${station.name} live`}
+                    aria-label={isCurrentLive ? `Pause ${station.name}` : `Play ${station.name} live`}
                   >
                     {isCurrentLive ? (
                       <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
@@ -285,14 +322,14 @@ export default function StationList() {
                           </div>
 
                           <button
-                            onClick={() => handlePlayLive(station)}
+                            onClick={() => handleTogglePlay(station)}
                             className={`w-9 h-9 flex items-center justify-center rounded-full flex-shrink-0 transition-colors ${
                               isCurrentLive
                                 ? 'bg-red-500 text-white'
                                 : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-blue-500 hover:text-white'
                             }`}
-                            aria-label={`Play ${station.name} live`}
-                            title="Play live"
+                            aria-label={isCurrentLive ? `Pause ${station.name}` : `Play ${station.name} live`}
+                            title={isCurrentLive ? 'Pause' : 'Play live'}
                           >
                             {isCurrentLive ? (
                               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
