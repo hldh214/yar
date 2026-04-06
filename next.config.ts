@@ -6,4 +6,8 @@ const nextConfig: NextConfig = {
 
 export default nextConfig;
 
-import('@opennextjs/cloudflare').then(m => m.initOpenNextCloudflareForDev());
+// Only initialize OpenNext Cloudflare dev server when running `next dev` locally.
+// Skip during `next build` (Vercel, CF, or self-hosted) to avoid EPIPE / missing module errors.
+if (process.env.NODE_ENV === 'development') {
+  import('@opennextjs/cloudflare').then(m => m.initOpenNextCloudflareForDev()).catch(() => {});
+}

@@ -46,37 +46,29 @@ No environment variables are required. The auth key is bundled in the repository
 
 ## Deployment
 
-### Vercel (recommended)
+The project is compatible with multiple deployment targets out of the box.
 
-The project works out of the box on Vercel:
+### Vercel
 
 1. Push to a git repository
 2. Import the project on [vercel.com](https://vercel.com)
 3. Deploy -- no configuration needed
 
-Vercel's Edge Network handles the serverless API routes natively.
+Vercel's serverless functions handle the API routes natively.
 
 ### Cloudflare Workers (via OpenNext)
 
 Next.js can be deployed to Cloudflare Workers using [OpenNext for Cloudflare](https://opennext.js.org/cloudflare):
 
 ```bash
-# Install the adapter
-npm install -D @opennextjs/cloudflare
-
-# Build for Cloudflare
-npx cloudflare
-
 # Preview locally
-npx wrangler dev
+npm run preview
 
-# Deploy
-npx wrangler deploy
+# Deploy to Cloudflare
+npm run deploy
 ```
 
-You will need a `wrangler.jsonc` (or `wrangler.toml`) configuration file. See the [OpenNext Cloudflare docs](https://opennext.js.org/cloudflare/get-started) for details.
-
-> **Note**: The auth key file (`src/lib/auth-key.txt`, ~168KB) is bundled at build time. Ensure your worker size limit accommodates this.
+The project already includes `wrangler.jsonc` and `open-next.config.ts`. See the [OpenNext Cloudflare docs](https://opennext.js.org/cloudflare/get-started) for further customization.
 
 ### Self-hosted
 
@@ -114,7 +106,7 @@ src/
     ├── radiko-auth.ts           # Android auth module
     ├── radiko-parser.ts         # XML parsing, station-to-area mapping
     ├── storage.ts               # localStorage persistence
-    └── auth-key.txt             # Android auth key
+    └── auth-key-data.ts         # Android auth key (base64 constant)
 ```
 
 ## Disclaimer
