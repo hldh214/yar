@@ -121,6 +121,72 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     return () => clearInterval(id);
   }, [currentInfo, isBehindLive]);
 
+  // Auto-update currentInfo when live program transitions to next program
+  useEffect(() => {
+    if (!currentInfo || currentInfo.type !== 'live') return;
+    if (isBehindLive) return;
+
+    const fetchAndUpdate = async () => {
+      const info = currentInfoRef.current;
+      if (!info || info.type !== 'live' || isBehindLiveRef.current) return;
+
+      try {
+        const res = await fetch(`/api/programs?stationId=${info.stationId}`);
+        const data = await res.json();
+        if (!data.programs) return;
+        const onAir = data.programs.find((p: { isOnAir: boolean }) => p.isOnAir);
+        if (!onAir) return;
+
+        // Only update if the program actually changed
+        if (onAir.startTime === info.ft) return;
+
+        const updated: PlaybackInfo = {
+          ...info,
+          title: onAir.title || info.stationName,
+          performer: onAir.performer || info.stationName,
+          ft: onAir.startTime,
+          to: onAir.endTime,
+        };
+        setCurrentInfo(updated);
+        // Reset liveElapsed for the new program
+        const newFtDate = parseRadikoDate(onAir.startTime);
+        const newElapsed = (Date.now() - newFtDate.getTime()) / 1000;
+        setLiveElapsed(Math.max(0, newElapsed));
+        // Reset seekOffset and currentTime for the new program baseline
+        seekOffsetRef.current = 0;
+        currentTimeRef.current = 0;
+        setCurrentTime(0);
+
+        // Update media session
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: updated.title,
+            artist: updated.performer,
+            album: updated.stationName,
+            artwork: updated.stationLogo
+              ? [{ src: updated.stationLogo, sizes: '256x256', type: 'image/png' }]
+              : [],
+          });
+        }
+      } catch {
+        // Silently fail — will retry next cycle
+      }
+    };
+
+    if (currentInfo.to) {
+      // Schedule precisely at program end + 1s buffer
+      const toDate = parseRadikoDate(currentInfo.to);
+      const msUntilEnd = toDate.getTime() - Date.now();
+      const delay = msUntilEnd > 0 ? msUntilEnd + 1000 : 0;
+      const timer = setTimeout(fetchAndUpdate, delay);
+      return () => clearTimeout(timer);
+    } else {
+      // No `to` available — poll every 60s
+      const id = setInterval(fetchAndUpdate, 60000);
+      return () => clearInterval(id);
+    }
+  }, [currentInfo, isBehindLive]);
+
   // Ensure audio element exists
   useEffect(() => {
     if (!audioRef.current) {
