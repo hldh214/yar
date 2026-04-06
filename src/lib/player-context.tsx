@@ -260,7 +260,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       const res = await fetch(`/api/stream/timefree?${params}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      const proxyParams = new URLSearchParams({ url: data.playlistUrl });
+      const proxyParams = new URLSearchParams({ url: btoa(data.playlistUrl) });
       if (data.areaId) proxyParams.set('areaId', data.areaId);
       return `/api/stream/proxy?${proxyParams}`;
     },
@@ -275,7 +275,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       const res = await fetch(`/api/stream/live?${params}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      const proxyParams = new URLSearchParams({ url: data.playlistUrl });
+      const proxyParams = new URLSearchParams({ url: btoa(data.playlistUrl) });
       if (data.areaId) proxyParams.set('areaId', data.areaId);
       return `/api/stream/proxy?${proxyParams}`;
     },
@@ -406,7 +406,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             const data = await res.json();
             if (data.error) throw new Error(data.error);
 
-            const proxyParams = new URLSearchParams({ url: data.playlistUrl });
+            const proxyParams = new URLSearchParams({ url: btoa(data.playlistUrl) });
             if (data.areaId) proxyParams.set('areaId', data.areaId);
             const proxyUrl = `/api/stream/proxy?${proxyParams}`;
             if (seekIdRef.current !== thisSeekId) return;

@@ -1,16 +1,27 @@
-// GET /api/stream/proxy?url=...&areaId=JP13
+// GET /api/stream/proxy?url=<base64>&areaId=JP13
 // Proxy HLS playlist and segment requests to radiko with auth token
+// The url parameter is base64-encoded to prevent CF Workers from decoding nested URL parameters
 // areaId is passed through from stream endpoints (auto-resolved from stationId there)
-// This is needed because the browser cannot set custom headers on HLS requests
 import { NextRequest } from "next/server";
 import { getRadikoAuth, invalidateAuthCache } from "@/lib/radiko-auth";
 
 export async function GET(request: NextRequest) {
   try {
-    const targetUrl = request.nextUrl.searchParams.get("url");
-    const areaId = request.nextUrl.searchParams.get("areaId") || undefined;
-    if (!targetUrl) {
+    const reqUrl = new URL(request.url);
+    const urlParam = reqUrl.searchParams.get("url");
+    const areaId = reqUrl.searchParams.get("areaId") || undefined;
+
+    if (!urlParam) {
       return Response.json({ error: "url is required" }, { status: 400 });
+    }
+
+    // Decode base64-encoded target URL
+    let targetUrl: string;
+    try {
+      targetUrl = atob(urlParam);
+    } catch {
+      // Fallback: treat as plain URL for backwards compatibility
+      targetUrl = urlParam;
     }
 
     const auth = await getRadikoAuth(areaId);
@@ -70,16 +81,17 @@ async function handleProxyResponse(
   ) {
     let body = await res.text();
 
-    // Rewrite relative URLs to absolute, then proxy them
+    // Rewrite relative URLs to absolute, then base64-encode and proxy them
     const baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf("/") + 1);
+    const origin = new URL(request.url).origin;
     body = body.replace(/^(?!#)(.+)$/gm, (line) => {
       if (line.trim() === "") return line;
       let absoluteUrl = line.trim();
       if (!absoluteUrl.startsWith("http")) {
         absoluteUrl = baseUrl + absoluteUrl;
       }
-      const proxyBase = new URL("/api/stream/proxy", request.nextUrl.origin);
-      proxyBase.searchParams.set("url", absoluteUrl);
+      const proxyBase = new URL("/api/stream/proxy", origin);
+      proxyBase.searchParams.set("url", btoa(absoluteUrl));
       if (areaId) proxyBase.searchParams.set("areaId", areaId);
       return proxyBase.toString();
     });
