@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { usePlayer } from '@/lib/player-context';
+import { usePlayer, usePlayerTime } from '@/lib/player-context';
 import { formatTime } from '@/lib/radiko-parser';
 
 interface Program {
@@ -200,13 +200,104 @@ function SongList({ stationId, ft, to, compact }: { stationId: string; ft: strin
   );
 }
 
+// --- Now-playing song bar (subscribes to high-frequency time context) ---
+// Isolated into its own component so that time-tick re-renders (~4x/sec)
+// don't cascade to the parent ProgramDetail or the rest of the schedule.
+function NowPlayingSongBar({
+  playingSongs,
+  noaItems,
+  stationId,
+}: {
+  playingSongs: NoaItem[];
+  noaItems: NoaItem[];
+  stationId: string;
+}) {
+  const { currentInfo, isPlaying, isBehindLive } = usePlayer();
+  const { currentTime } = usePlayerTime();
+
+  const nowPlayingSong = useMemo(() => {
+    const ft = currentInfo?.ft;
+    if (!ft || !playingSongs.length) return null;
+    const isTimefreePlaying = currentInfo?.stationId === stationId && isPlaying &&
+      (currentInfo?.type === 'timefree' || (currentInfo?.type === 'live' && isBehindLive));
+    if (!isTimefreePlaying) return null;
+    return findSongAtTime(playingSongs, ft, currentTime);
+  }, [playingSongs, currentInfo, stationId, isPlaying, isBehindLive, currentTime]);
+
+  const latestSong = noaItems.length > 0 ? noaItems[0] : null;
+  const song = nowPlayingSong || (latestSong?.title ? latestSong : null);
+  if (!song) return null;
+
+  const isTimefreeMode = !!nowPlayingSong;
+
+  return (
+    <div className={`flex items-center gap-2 sm:gap-2.5 p-2 sm:p-2.5 rounded-lg bg-gradient-to-r border ${
+      isTimefreeMode
+        ? 'from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 border-blue-200/60 dark:border-blue-800/40'
+        : 'from-green-50 to-emerald-50 dark:from-green-950/20 dark:to-emerald-950/20 border-green-200/60 dark:border-green-800/40'
+    }`}>
+      {isRealImage(song.img) ? (
+        <img src={song.img} alt="" className="w-9 h-9 sm:w-10 sm:h-10 rounded shadow-sm object-cover flex-shrink-0" />
+      ) : (
+        <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded flex items-center justify-center flex-shrink-0 ${
+          isTimefreeMode
+            ? 'bg-blue-100 dark:bg-blue-900/30'
+            : 'bg-green-100 dark:bg-green-900/30'
+        }`}>
+          <svg className={`w-5 h-5 ${isTimefreeMode ? 'text-blue-500' : 'text-green-500'}`} viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
+          </svg>
+        </div>
+      )}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1">
+          {isTimefreeMode ? (
+            <svg className="w-3 h-3 text-blue-500 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
+            </svg>
+          ) : (
+            <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse flex-shrink-0" />
+          )}
+          <span className={`text-[10px] font-semibold uppercase tracking-wide ${
+            isTimefreeMode
+              ? 'text-blue-600 dark:text-blue-400'
+              : 'text-green-600 dark:text-green-400'
+          }`}>
+            {isTimefreeMode ? 'Listening' : 'Now Playing'}
+          </span>
+        </div>
+        <p className="text-sm font-medium truncate leading-tight">{song.title}</p>
+        <p className="text-xs text-gray-500 dark:text-gray-400 truncate leading-tight">{song.artist}</p>
+      </div>
+      {(song.itunes || song.amazon) && (
+        <div className="flex gap-1 flex-shrink-0">
+          {song.itunes && (
+            <a href={song.itunes} target="_blank" rel="noopener noreferrer"
+              className="w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center rounded-full bg-white/80 dark:bg-gray-800 hover:bg-pink-50 dark:hover:bg-pink-900/30 transition-colors shadow-sm"
+              title="Apple Music">
+              <svg className="w-3.5 h-3.5 text-pink-500" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" /></svg>
+            </a>
+          )}
+          {song.amazon && (
+            <a href={song.amazon} target="_blank" rel="noopener noreferrer"
+              className="w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center rounded-full bg-white/80 dark:bg-gray-800 hover:bg-orange-50 dark:hover:bg-orange-900/30 transition-colors shadow-sm"
+              title="Amazon">
+              <svg className="w-3.5 h-3.5 text-orange-500" viewBox="0 0 24 24" fill="currentColor"><path d="M1 16c3.04 2.19 7.4 3.5 12 3.5 3.2 0 6.7-.7 9.6-2.1.5-.2.9.3.5.7C20.3 20.4 16.5 22 12 22 7.3 22 3.1 20.2.4 17.2c-.3-.4.1-.8.6-.5z" /></svg>
+            </a>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // --- Program Detail View (the main content area) ---
 function ProgramDetail({
   program,
   station,
   stationId,
   noaItems,
-  nowPlayingSong,
+  playingSongs,
   isStationLive,
   onPlayLive,
   onPlayTimefree,
@@ -217,7 +308,7 @@ function ProgramDetail({
   station: Station | null;
   stationId: string;
   noaItems: NoaItem[];
-  nowPlayingSong: NoaItem | null;
+  playingSongs: NoaItem[];
   isStationLive: boolean;
   onPlayLive: () => void;
   onPlayTimefree: (p: Program) => void;
@@ -232,7 +323,6 @@ function ProgramDetail({
     );
   }
 
-  const latestSong = noaItems.length > 0 ? noaItems[0] : null;
   const isThisProgramPlaying = program && currentInfo?.stationId === station.id && isPlaying &&
     ((currentInfo?.type === 'timefree' && currentInfo?.ft === program.startTime) ||
      (currentInfo?.type === 'live' && program.isOnAir));
@@ -276,71 +366,8 @@ function ProgramDetail({
         </button>
       </div>
 
-      {/* Now playing song bar */}
-      {(() => {
-        const song = nowPlayingSong || (latestSong?.title ? latestSong : null);
-        if (!song) return null;
-        const isTimefreeMode = !!nowPlayingSong;
-        return (
-          <div className={`flex items-center gap-2 sm:gap-2.5 p-2 sm:p-2.5 rounded-lg bg-gradient-to-r border ${
-            isTimefreeMode
-              ? 'from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 border-blue-200/60 dark:border-blue-800/40'
-              : 'from-green-50 to-emerald-50 dark:from-green-950/20 dark:to-emerald-950/20 border-green-200/60 dark:border-green-800/40'
-          }`}>
-            {isRealImage(song.img) ? (
-              <img src={song.img} alt="" className="w-9 h-9 sm:w-10 sm:h-10 rounded shadow-sm object-cover flex-shrink-0" />
-            ) : (
-              <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded flex items-center justify-center flex-shrink-0 ${
-                isTimefreeMode
-                  ? 'bg-blue-100 dark:bg-blue-900/30'
-                  : 'bg-green-100 dark:bg-green-900/30'
-              }`}>
-                <svg className={`w-5 h-5 ${isTimefreeMode ? 'text-blue-500' : 'text-green-500'}`} viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
-                </svg>
-              </div>
-            )}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1">
-                {isTimefreeMode ? (
-                  <svg className="w-3 h-3 text-blue-500 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
-                  </svg>
-                ) : (
-                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse flex-shrink-0" />
-                )}
-                <span className={`text-[10px] font-semibold uppercase tracking-wide ${
-                  isTimefreeMode
-                    ? 'text-blue-600 dark:text-blue-400'
-                    : 'text-green-600 dark:text-green-400'
-                }`}>
-                  {isTimefreeMode ? 'Listening' : 'Now Playing'}
-                </span>
-              </div>
-              <p className="text-sm font-medium truncate leading-tight">{song.title}</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400 truncate leading-tight">{song.artist}</p>
-            </div>
-            {(song.itunes || song.amazon) && (
-              <div className="flex gap-1 flex-shrink-0">
-                {song.itunes && (
-                  <a href={song.itunes} target="_blank" rel="noopener noreferrer"
-                    className="w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center rounded-full bg-white/80 dark:bg-gray-800 hover:bg-pink-50 dark:hover:bg-pink-900/30 transition-colors shadow-sm"
-                    title="Apple Music">
-                    <svg className="w-3.5 h-3.5 text-pink-500" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" /></svg>
-                  </a>
-                )}
-                {song.amazon && (
-                  <a href={song.amazon} target="_blank" rel="noopener noreferrer"
-                    className="w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center rounded-full bg-white/80 dark:bg-gray-800 hover:bg-orange-50 dark:hover:bg-orange-900/30 transition-colors shadow-sm"
-                    title="Amazon">
-                    <svg className="w-3.5 h-3.5 text-orange-500" viewBox="0 0 24 24" fill="currentColor"><path d="M1 16c3.04 2.19 7.4 3.5 12 3.5 3.2 0 6.7-.7 9.6-2.1.5-.2.9.3.5.7C20.3 20.4 16.5 22 12 22 7.3 22 3.1 20.2.4 17.2c-.3-.4.1-.8.6-.5z" /></svg>
-                  </a>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })()}
+      {/* Now playing song bar — isolated component to avoid time-tick re-renders */}
+      <NowPlayingSongBar playingSongs={playingSongs} noaItems={noaItems} stationId={stationId} />
 
       {/* Divider */}
       <div className="border-t border-gray-200 dark:border-gray-700" />
@@ -631,7 +658,7 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
   const [noaItems, setNoaItems] = useState<NoaItem[]>([]);
   const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const { playLive, playTimefree, currentInfo, isPlaying, currentTime: playerCurrentTime, isBehindLive } = usePlayer();
+  const { playLive, playTimefree, currentInfo, isPlaying, isBehindLive } = usePlayer();
 
   const scheduleRef = useRef<HTMLDivElement>(null);
   const onAirRef = useRef<HTMLDivElement>(null);
@@ -699,16 +726,6 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
       .catch(() => {});
     return () => { active = false; };
   }, [stationId, currentInfo, isPlaying, isBehindLive]);
-
-  // Derive the currently playing song based on playback position
-  const nowPlayingSong = useMemo(() => {
-    const ft = currentInfo?.ft;
-    if (!ft || !playingSongs.length) return null;
-    const isTimefreePlaying = currentInfo?.stationId === stationId && isPlaying &&
-      (currentInfo?.type === 'timefree' || (currentInfo?.type === 'live' && isBehindLive));
-    if (!isTimefreePlaying) return null;
-    return findSongAtTime(playingSongs, ft, playerCurrentTime);
-  }, [playingSongs, currentInfo, stationId, isPlaying, isBehindLive, playerCurrentTime]);
 
   // Auto-scroll to on-air program in schedule (centered)
   useEffect(() => {
@@ -866,7 +883,7 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
             station={data?.station || null}
             stationId={stationId}
             noaItems={noaItems}
-            nowPlayingSong={nowPlayingSong}
+            playingSongs={playingSongs}
             isStationLive={isStationLive}
             onPlayLive={handlePlayLive}
             onPlayTimefree={handlePlayTimefree}

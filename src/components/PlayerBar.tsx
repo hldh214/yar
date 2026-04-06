@@ -1,6 +1,6 @@
 'use client';
 
-import { usePlayer } from '@/lib/player-context';
+import { usePlayer, usePlayerTime } from '@/lib/player-context';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 function formatSeconds(s: number): string {
@@ -373,11 +373,9 @@ export default function PlayerBar() {
     isLoading,
     currentInfo,
     volume,
-    currentTime,
     duration,
     error,
     isBehindLive,
-    liveElapsed,
     pause,
     resume,
     setVolume,
@@ -387,6 +385,7 @@ export default function PlayerBar() {
     skipForward,
     skipBackward,
   } = usePlayer();
+  const { currentTime, liveElapsed } = usePlayerTime();
 
   // Set CSS variable for content padding to avoid overlap
   useEffect(() => {

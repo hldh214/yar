@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useCallback, useRef, useState, useEffect } from 'react';
+import React, { createContext, useContext, useCallback, useRef, useState, useEffect, useMemo } from 'react';
 import Hls from 'hls.js';
 import { getVolume, saveVolume as persistVolume, recordStationPlay } from '@/lib/storage';
 
@@ -45,13 +45,10 @@ interface PlayerContextType {
   isLoading: boolean;
   currentInfo: PlaybackInfo | null;
   volume: number;
-  currentTime: number;
   duration: number;
   error: string | null;
   // Live seek-back: when true, we're playing timefree behind the live edge
   isBehindLive: boolean;
-  // Live elapsed: seconds since program start (real-time, ticks every second)
-  liveElapsed: number;
   playLive: (info: PlaybackInfo) => Promise<void>;
   playTimefree: (info: PlaybackInfo) => Promise<void>;
   pause: () => void;
@@ -64,12 +61,26 @@ interface PlayerContextType {
   skipBackward: () => void;
 }
 
+// High-frequency time context (updates ~4x/sec via timeupdate events).
+// Separated so that components not needing time don't re-render on every tick.
+interface PlayerTimeContextType {
+  currentTime: number;
+  liveElapsed: number;
+}
+
 const PlayerContext = createContext<PlayerContextType | null>(null);
+const PlayerTimeContext = createContext<PlayerTimeContextType>({ currentTime: 0, liveElapsed: 0 });
 
 export function usePlayer() {
   const ctx = useContext(PlayerContext);
   if (!ctx) throw new Error('usePlayer must be inside PlayerProvider');
   return ctx;
+}
+
+// Use this hook only in components that need high-frequency playback time.
+// Other components should use usePlayer() to avoid unnecessary re-renders.
+export function usePlayerTime() {
+  return useContext(PlayerTimeContext);
 }
 
 const SKIP_SECONDS = 10;
@@ -683,31 +694,44 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     };
   }, [resume, pause, skipForward, skipBackward]);
 
+  // Memoize the low-frequency context value so consumers only re-render
+  // when one of these values actually changes (not on every time tick).
+  const playerValue = useMemo<PlayerContextType>(() => ({
+    isPlaying,
+    isLoading,
+    currentInfo,
+    volume,
+    duration,
+    error,
+    isBehindLive,
+    playLive,
+    playTimefree,
+    pause,
+    resume,
+    setVolume,
+    seek,
+    seekLive,
+    backToLive,
+    skipForward,
+    skipBackward,
+  }), [
+    isPlaying, isLoading, currentInfo, volume, duration, error, isBehindLive,
+    playLive, playTimefree, pause, resume, setVolume, seek, seekLive, backToLive,
+    skipForward, skipBackward,
+  ]);
+
+  // High-frequency time context — updates ~4x/sec, only consumed by
+  // components that actually need the playback position (e.g. progress bar).
+  const timeValue = useMemo<PlayerTimeContextType>(
+    () => ({ currentTime, liveElapsed }),
+    [currentTime, liveElapsed]
+  );
+
   return (
-    <PlayerContext.Provider
-      value={{
-        isPlaying,
-        isLoading,
-        currentInfo,
-        volume,
-        currentTime,
-        duration,
-        error,
-        isBehindLive,
-        liveElapsed,
-        playLive,
-        playTimefree,
-        pause,
-        resume,
-        setVolume,
-        seek,
-        seekLive,
-        backToLive,
-        skipForward,
-        skipBackward,
-      }}
-    >
-      {children}
+    <PlayerContext.Provider value={playerValue}>
+      <PlayerTimeContext.Provider value={timeValue}>
+        {children}
+      </PlayerTimeContext.Provider>
     </PlayerContext.Provider>
   );
 }
