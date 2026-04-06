@@ -1,36 +1,138 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Yar
 
-## Getting Started
+A third-party web frontend for [radiko](https://radiko.jp), Japan's internet radio service.
 
-First, run the development server:
+Built with Next.js (App Router), TypeScript, Tailwind CSS, and hls.js.
+
+## Features
+
+- **Nationwide station access** -- browse and play all radiko stations across Japan, not just your local area
+- **Live streaming** -- one-click live radio playback
+- **Timefree playback** -- listen to programs from the past 7 days with seek, skip, and progress bar
+- **Now-playing song display** -- shows the currently playing song via radiko's Music API, with links to Apple Music and Amazon
+- **Station detail page** -- program detail view with description, song list, and a schedule sidebar (desktop) or bottom sheet (mobile)
+- **Background playback** -- Media Session API integration for OS-level play/pause/skip controls
+- **User preferences** -- volume level, recent stations, and region preferences are remembered via localStorage
+- **Personalized home page** -- frequently played stations shown at the top, regions sorted by listening history
+
+## How it works
+
+The app uses Next.js API routes to proxy all radiko API calls (radiko does not provide CORS headers). Authentication uses Android app mode (`aSmartPhone8`) with fake GPS coordinates to bypass regional restrictions, enabling nationwide station access from any location.
+
+Key technical details:
+
+- **Auth**: Two-step auth flow (auth1 → partial key extraction → auth2 with GPS) with per-area token caching (70 min TTL)
+- **Streaming**: HLS streams via hls.js. Pause destroys the HLS instance to stop all network requests; resume re-requests from the saved position
+- **Timefree seeking**: Re-requests the m3u8 playlist with a `seek` parameter (radiko caps the `l` parameter at 300 seconds, so native HLS seeking doesn't work)
+- **Station-to-area mapping**: Built from `region/full.xml`, cached for 1 hour. The frontend never handles areaId -- all resolution is server-side
+
+## Getting started
 
 ```bash
+# Install dependencies
+npm install
+
+# Development server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+
+# Production build
+npm run build
+npm start
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+No environment variables are required. The auth key is bundled in the repository.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Deployment
 
-## Learn More
+### Vercel (recommended)
 
-To learn more about Next.js, take a look at the following resources:
+The project works out of the box on Vercel:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Push to a git repository
+2. Import the project on [vercel.com](https://vercel.com)
+3. Deploy -- no configuration needed
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Vercel's Edge Network handles the serverless API routes natively.
 
-## Deploy on Vercel
+### Cloudflare Workers (via OpenNext)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Next.js can be deployed to Cloudflare Workers using [OpenNext for Cloudflare](https://opennext.js.org/cloudflare):
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+# Install the adapter
+npm install -D @opennextjs/cloudflare
+
+# Build for Cloudflare
+npx cloudflare
+
+# Preview locally
+npx wrangler dev
+
+# Deploy
+npx wrangler deploy
+```
+
+You will need a `wrangler.jsonc` (or `wrangler.toml`) configuration file. See the [OpenNext Cloudflare docs](https://opennext.js.org/cloudflare/get-started) for details.
+
+> **Note**: The auth key file (`src/lib/auth-key.txt`, ~168KB) is bundled at build time. Ensure your worker size limit accommodates this.
+
+### Self-hosted
+
+```bash
+npm run build
+npm start
+```
+
+Runs on port 3000 by default. Use a reverse proxy (nginx, caddy) for HTTPS in production.
+
+## Project structure
+
+```
+src/
+├── app/
+│   ├── api/
+│   │   ├── auth/route.ts        # Radiko auth endpoint
+│   │   ├── stations/route.ts    # Nationwide station list
+│   │   ├── programs/route.ts    # Program schedule
+│   │   ├── noa/route.ts         # Now-on-air songs (Music API)
+│   │   └── stream/
+│   │       ├── live/route.ts    # Live stream playlist
+│   │       ├── timefree/route.ts # Timefree stream playlist
+│   │       └── proxy/route.ts   # HLS proxy (rewrites m3u8 URLs)
+│   ├── station/[id]/page.tsx    # Station detail page
+│   ├── page.tsx                 # Home page (station list)
+│   ├── layout.tsx               # Root layout
+│   └── globals.css              # Global styles
+├── components/
+│   ├── PlayerBar.tsx            # Bottom player bar with controls
+│   ├── ProgramSchedule.tsx      # Station detail + schedule
+│   └── StationList.tsx          # Home page station grid
+└── lib/
+    ├── player-context.tsx       # Global player state (hls.js, Media Session)
+    ├── radiko-auth.ts           # Android auth module
+    ├── radiko-parser.ts         # XML parsing, station-to-area mapping
+    ├── storage.ts               # localStorage persistence
+    └── auth-key.txt             # Android auth key
+```
+
+## Disclaimer
+
+This project is provided **strictly for educational and personal learning purposes only**. It is a non-commercial, open-source study project intended to explore web audio streaming, HLS protocol handling, and modern frontend development techniques.
+
+**By using this software, you acknowledge and agree to the following:**
+
+1. **Not affiliated with radiko**: This project is not affiliated with, endorsed by, or associated with radiko Co., Ltd. or any of its partner broadcasters in any way. "radiko" is a registered trademark of radiko Co., Ltd.
+
+2. **Terms of Service**: Users are solely responsible for ensuring their use of this software complies with [radiko's Terms of Service](https://radiko.jp/#!/guidelines). The author(s) do not encourage, condone, or support any use of this software that violates radiko's Terms of Service or any applicable laws and regulations.
+
+3. **Copyright**: All radio broadcast content, program metadata, station logos, and music information accessed through this software are copyrighted by their respective broadcasters and rights holders. This software does not store, redistribute, or re-host any copyrighted content.
+
+4. **No warranty**: This software is provided "as-is" without any warranty of any kind, express or implied. The author(s) assume no liability for any damages, legal consequences, or other issues arising from the use or misuse of this software.
+
+5. **Regional restrictions**: radiko's service is intended for use within Japan. This software's ability to access streams from different regions does not constitute authorization to circumvent geographic restrictions. Users should respect the intended service boundaries.
+
+6. **Your responsibility**: You use this software entirely at your own risk. If you are unsure whether your use case is permitted, do not use this software and consult radiko's official terms directly.
+
+**If you are a rights holder and have concerns about this project, please open an issue and it will be addressed promptly.**

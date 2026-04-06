@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useCallback, useRef, useState, useEffect } from 'react';
 import Hls from 'hls.js';
+import { getVolume, saveVolume as persistVolume, recordStationPlay } from '@/lib/storage';
 
 // Parse YYYYMMDDHHmmss (JST) into a UTC Date
 function parseRadikoDate(str: string): Date {
@@ -75,7 +76,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
   const [currentInfo, setCurrentInfo] = useState<PlaybackInfo | null>(null);
   const currentInfoRef = useRef<PlaybackInfo | null>(null);
-  const [volume, setVolumeState] = useState(0.8);
+  const [volume, setVolumeState] = useState(() => getVolume());
   const [currentTime, setCurrentTime] = useState(0);
   const currentTimeRef = useRef(0);
   const [duration, setDuration] = useState(0);
@@ -284,6 +285,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const playLive = useCallback(
     async (info: PlaybackInfo) => {
       try {
+        recordStationPlay({
+          id: info.stationId,
+          name: info.stationName,
+          logoUrl: info.stationLogo,
+        });
         const proxyUrl = await fetchLiveProxyUrl(info);
         await loadHlsStream(proxyUrl, { ...info, type: 'live' });
       } catch (e) {
@@ -297,6 +303,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const playTimefree = useCallback(
     async (info: PlaybackInfo) => {
       try {
+        recordStationPlay({
+          id: info.stationId,
+          name: info.stationName,
+          logoUrl: info.stationLogo,
+        });
         const proxyUrl = await fetchTimefreeProxyUrl(info);
         await loadHlsStream(proxyUrl, { ...info, type: 'timefree' });
       } catch (e) {
@@ -357,6 +368,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const setVolume = useCallback((v: number) => {
     const clamped = Math.max(0, Math.min(1, v));
     setVolumeState(clamped);
+    persistVolume(clamped);
     if (audioRef.current) {
       audioRef.current.volume = clamped;
     }
