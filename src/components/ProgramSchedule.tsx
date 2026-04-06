@@ -120,13 +120,16 @@ function SongList({ stationId, ft, to, compact }: { stationId: string; ft: strin
 
   if (songs.length === 0) return null;
 
+  // Show newest songs first
+  const sorted = [...songs].reverse();
+
   return (
     <div className="space-y-1">
       <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
         Songs ({songs.length})
       </h3>
-      {songs.map((song) => (
-        <div key={song.id} className={`flex items-center gap-2.5 py-1.5 group ${compact ? '' : 'py-2'}`}>
+      {sorted.map((song) => (
+        <div key={song.id} className={`flex items-start gap-2.5 ${compact ? 'py-1.5' : 'py-2'}`}>
           {isRealImage(song.img) ? (
             <img src={song.img} alt="" className={`rounded object-cover flex-shrink-0 ${compact ? 'w-8 h-8' : 'w-10 h-10'}`} />
           ) : (
@@ -139,28 +142,26 @@ function SongList({ stationId, ft, to, compact }: { stationId: string; ft: strin
           <div className="flex-1 min-w-0">
             <p className={`font-medium truncate leading-tight ${compact ? 'text-xs' : 'text-sm'}`}>{song.title}</p>
             <p className={`text-gray-500 dark:text-gray-400 truncate leading-tight ${compact ? 'text-[11px]' : 'text-xs'}`}>{song.artist}</p>
+            {(song.itunes || song.amazon) && (
+              <div className="flex gap-2 mt-0.5">
+                {song.itunes && (
+                  <a href={song.itunes} target="_blank" rel="noopener noreferrer"
+                    className="text-[10px] text-pink-500 hover:text-pink-600 dark:text-pink-400 dark:hover:text-pink-300 transition-colors">
+                    Apple Music
+                  </a>
+                )}
+                {song.amazon && (
+                  <a href={song.amazon} target="_blank" rel="noopener noreferrer"
+                    className="text-[10px] text-orange-500 hover:text-orange-600 dark:text-orange-400 dark:hover:text-orange-300 transition-colors">
+                    Amazon
+                  </a>
+                )}
+              </div>
+            )}
           </div>
-          <span className="text-[10px] text-gray-400 dark:text-gray-500 font-mono flex-shrink-0">
+          <span className="text-[10px] text-gray-400 dark:text-gray-500 font-mono flex-shrink-0 mt-0.5">
             {formatStamp(song.stamp)}
           </span>
-          {(song.itunes || song.amazon) && (
-            <div className="flex gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-              {song.itunes && (
-                <a href={song.itunes} target="_blank" rel="noopener noreferrer"
-                  className="w-6 h-6 flex items-center justify-center rounded bg-gray-100 dark:bg-gray-700 hover:bg-pink-100 dark:hover:bg-pink-900/30 transition-colors"
-                  title="Apple Music">
-                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" /></svg>
-                </a>
-              )}
-              {song.amazon && (
-                <a href={song.amazon} target="_blank" rel="noopener noreferrer"
-                  className="w-6 h-6 flex items-center justify-center rounded bg-gray-100 dark:bg-gray-700 hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors"
-                  title="Amazon">
-                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M1 16c3.04 2.19 7.4 3.5 12 3.5 3.2 0 6.7-.7 9.6-2.1.5-.2.9.3.5.7C20.3 20.4 16.5 22 12 22 7.3 22 3.1 20.2.4 17.2c-.3-.4.1-.8.6-.5z" /></svg>
-                </a>
-              )}
-            </div>
-          )}
         </div>
       ))}
     </div>

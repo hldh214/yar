@@ -2,19 +2,33 @@
 // Uses Android app mode (aSmartPhone8) to bypass IP-based area restriction.
 // Each area gets its own auth token via fake GPS coordinates.
 
-import { readFileSync } from "fs";
-import { join } from "path";
+import { AUTH_KEY_BASE64 } from "./auth-key-data";
+
+// Decode base64 to Uint8Array (works in both Node.js and CF Workers/Edge)
+function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) {
+    bytes[i] = bin.charCodeAt(i);
+  }
+  return bytes;
+}
+
+// Uint8Array to base64 (works in both Node.js and CF Workers/Edge)
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) {
+    bin += String.fromCharCode(bytes[i]);
+  }
+  return btoa(bin);
+}
 
 // Load the Android full auth key (base64-encoded JPEG)
-let FULL_KEY_BYTES: Buffer | null = null;
+let FULL_KEY_BYTES: Uint8Array | null = null;
 
-function getFullKeyBytes(): Buffer {
+function getFullKeyBytes(): Uint8Array {
   if (!FULL_KEY_BYTES) {
-    const b64 = readFileSync(
-      join(process.cwd(), "src/lib/auth-key.txt"),
-      "utf-8"
-    ).trim();
-    FULL_KEY_BYTES = Buffer.from(b64, "base64");
+    FULL_KEY_BYTES = base64ToBytes(AUTH_KEY_BASE64);
   }
   return FULL_KEY_BYTES;
 }
@@ -172,7 +186,7 @@ export async function getRadikoAuth(
   // Compute partial key from the Android full key
   const fullKey = getFullKeyBytes();
   const partialBytes = fullKey.subarray(keyOffset, keyOffset + keyLength);
-  const partialKey = partialBytes.toString("base64");
+  const partialKey = bytesToBase64(partialBytes);
 
   // Step 2: auth2 with fake GPS for the target area
   const auth2Res = await fetch("https://radiko.jp/v2/api/auth2", {
