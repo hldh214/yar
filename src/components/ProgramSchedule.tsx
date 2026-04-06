@@ -857,7 +857,10 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
     <>
       <div className="flex flex-1 min-h-0 gap-0 lg:gap-6">
         {/* === Left: Program detail (main area) === */}
-        <div className="flex-1 min-w-0 overflow-y-auto pb-20 pr-0 lg:pr-2 pt-2">
+        <div
+          className="flex-1 min-w-0 overflow-y-auto pr-0 lg:pr-2 pt-2"
+          style={{ paddingBottom: 'var(--player-bar-h, 0px)' }}
+        >
           <ProgramDetail
             program={selectedProgram}
             station={data?.station || null}
@@ -873,7 +876,10 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
         </div>
 
         {/* === Right: Schedule sidebar (desktop only) === */}
-        <div className="hidden lg:flex flex-col w-80 xl:w-96 flex-shrink-0 border-l border-gray-200 dark:border-gray-700 overflow-hidden pb-20">
+        <div
+          className="hidden lg:flex flex-col w-80 xl:w-96 flex-shrink-0 border-l border-gray-200 dark:border-gray-700 overflow-hidden"
+          style={{ paddingBottom: 'var(--player-bar-h, 0px)' }}
+        >
           <div ref={scheduleRef} className="flex-1 overflow-y-auto min-h-0">
             {scheduleContent}
           </div>
@@ -883,7 +889,8 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
       {/* === Mobile: Floating schedule button === */}
       <button
         onClick={() => setDrawerOpen(true)}
-        className="lg:hidden fixed bottom-24 right-3 sm:right-4 z-40 w-11 h-11 sm:w-12 sm:h-12 bg-blue-500 text-white rounded-full shadow-lg flex items-center justify-center hover:bg-blue-600 active:bg-blue-700 transition-colors"
+        className="lg:hidden fixed right-3 sm:right-4 z-40 w-11 h-11 sm:w-12 sm:h-12 bg-blue-500 text-white rounded-full shadow-lg flex items-center justify-center hover:bg-blue-600 active:bg-blue-700 transition-colors"
+        style={{ bottom: 'calc(var(--player-bar-h, 0px) + 16px)' }}
         aria-label="Open schedule"
       >
         <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">

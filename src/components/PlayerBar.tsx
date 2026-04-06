@@ -367,6 +367,7 @@ function VolumeSlider({ volume, onVolumeChange }: { volume: number; onVolumeChan
 // --- Main player bar ---
 
 export default function PlayerBar() {
+  const barRef = useRef<HTMLDivElement>(null);
   const {
     isPlaying,
     isLoading,
@@ -386,6 +387,26 @@ export default function PlayerBar() {
     skipForward,
     skipBackward,
   } = usePlayer();
+
+  // Set CSS variable for content padding to avoid overlap
+  useEffect(() => {
+    if (!currentInfo && !error) {
+      document.documentElement.style.setProperty('--player-bar-h', '0px');
+      return;
+    }
+    const el = barRef.current;
+    if (!el) return;
+    const update = () => {
+      document.documentElement.style.setProperty('--player-bar-h', `${el.offsetHeight}px`);
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      document.documentElement.style.setProperty('--player-bar-h', '0px');
+    };
+  }, [currentInfo, error]);
 
   if (!currentInfo && !error) return null;
 
@@ -408,7 +429,7 @@ export default function PlayerBar() {
   const barHideEndTime = isLive || (isTimefree && isOnAirProgram(currentInfo?.to));
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 bg-gray-900 text-white shadow-lg pb-safe">
+    <div ref={barRef} className="fixed bottom-0 left-0 right-0 z-50 bg-gray-900 text-white shadow-lg pb-safe">
       {/* Live-only pulse bar when no ft available */}
       {isLive && !hasLiveBar && (
         <div className="h-0.5 bg-red-500 animate-pulse" />
