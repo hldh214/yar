@@ -88,7 +88,19 @@ body {
   margin: 0.5rem 0;
 }
 
-/* Safe area padding for mobile bottom sheets */
+/* Safe area insets for notched / edge-to-edge devices */
 .pb-safe {
   padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+.pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+
+.pl-safe {
+  padding-left: env(safe-area-inset-left);
+}
+
+.pr-safe {
+  padding-right: env(safe-area-inset-right);
 }

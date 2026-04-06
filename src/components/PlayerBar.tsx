@@ -408,7 +408,7 @@ export default function PlayerBar() {
   const barHideEndTime = isLive || (isTimefree && isOnAirProgram(currentInfo?.to));
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 bg-gray-900 text-white shadow-lg">
+    <div className="fixed bottom-0 left-0 right-0 z-50 bg-gray-900 text-white shadow-lg pb-safe">
       {/* Live-only pulse bar when no ft available */}
       {isLive && !hasLiveBar && (
         <div className="h-0.5 bg-red-500 animate-pulse" />

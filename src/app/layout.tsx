@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Link from "next/link";
@@ -15,9 +15,29 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#111827" },
+  ],
+};
+
 export const metadata: Metadata = {
   title: "Yar - Radiko Web Player",
   description: "A third-party web frontend for radiko",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Yar",
+  },
+  formatDetection: {
+    telephone: false,
+  },
 };
 
 export default function RootLayout({
@@ -33,8 +53,8 @@ export default function RootLayout({
       <body className="h-full flex flex-col overflow-hidden bg-background text-foreground">
         <PlayerProvider>
           {/* Header - fixed height, never scrolls */}
-          <header className="flex-shrink-0 z-40 bg-white/80 dark:bg-gray-900/80 backdrop-blur border-b border-gray-200 dark:border-gray-800">
-            <div className="max-w-screen-xl mx-auto px-4 h-14 flex items-center">
+          <header className="flex-shrink-0 z-40 pt-safe bg-white/80 dark:bg-gray-900/80 backdrop-blur border-b border-gray-200 dark:border-gray-800">
+            <div className="max-w-screen-xl mx-auto px-4 pl-safe pr-safe h-14 flex items-center">
               <Link href="/" className="flex items-center gap-2">
                 <svg className="w-7 h-7 text-blue-500" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
