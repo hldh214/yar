@@ -1,7 +1,22 @@
 import type { NextConfig } from "next";
+import { execSync } from "child_process";
+
+function gitVersion(): string {
+  try {
+    return execSync("git describe --tags --always 2>/dev/null").toString().trim();
+  } catch {
+    try {
+      return execSync("git rev-parse --short HEAD").toString().trim();
+    } catch {
+      return "dev";
+    }
+  }
+}
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  env: {
+    NEXT_PUBLIC_GIT_VERSION: gitVersion(),
+  },
 };
 
 export default nextConfig;

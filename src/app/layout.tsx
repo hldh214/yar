@@ -69,6 +69,21 @@ export default function RootLayout({
             {children}
           </main>
 
+          {/* Footer */}
+          <footer className="flex-shrink-0 border-t border-gray-200 dark:border-gray-800 text-center text-xs text-gray-400 dark:text-gray-500 py-4 px-4"
+            style={{ paddingBottom: 'calc(var(--player-bar-h, 0px) + 1rem)' }}>
+            <p>
+              <a href="https://github.com/hldh214/yar" target="_blank" rel="noopener noreferrer"
+                className="hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
+                Yar
+              </a>
+              {' '}&mdash; Open-source Radiko web player &middot; MIT License
+            </p>
+            <p className="mt-0.5 font-mono">
+              {process.env.NEXT_PUBLIC_GIT_VERSION || 'dev'}
+            </p>
+          </footer>
+
           {/* Player bar (fixed at bottom, overlays content) */}
           <PlayerBar />
         </PlayerProvider>
