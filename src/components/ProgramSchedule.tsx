@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef, memo } from 'react';
 import { usePlayer, usePlayerTime } from '@/lib/player-context';
 import { formatTime, parseRadikoDate } from '@/lib/radiko-parser';
 
@@ -337,7 +337,10 @@ function NowPlayingSongBar({
 }
 
 // --- Program Detail View (the main content area) ---
-function ProgramDetail({
+// Wrapped in React.memo so that parent re-renders (e.g. from context isLoading
+// toggling every few seconds during HLS streaming) don't cascade into this
+// heavy subtree when none of its props have actually changed.
+const ProgramDetail = memo(function ProgramDetail({
   program,
   station,
   stationId,
@@ -553,10 +556,10 @@ function ProgramDetail({
       )}
     </div>
   );
-}
+});
 
 // --- Compact schedule list (used in sidebar and drawer) ---
-function ScheduleList({
+const ScheduleList = memo(function ScheduleList({
   programs,
   stationId,
   selectedProgramId,
@@ -656,7 +659,7 @@ function ScheduleList({
       })}
     </div>
   );
-}
+});
 
 // --- Mobile bottom sheet drawer ---
 function ScheduleDrawer({
