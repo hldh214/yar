@@ -256,7 +256,20 @@ function NowPlayingSongBar({
 
   const isLivePlaying = currentInfo?.stationId === stationId && isPlaying &&
     currentInfo?.type === 'live' && !isBehindLive;
-  const latestSong = isLivePlaying && noaItems.length > 0 ? noaItems[0] : null;
+  // For live, filter noaItems to only include songs from the current program
+  const latestSong = useMemo(() => {
+    if (!isLivePlaying || noaItems.length === 0) return null;
+    const ft = currentInfo?.ft;
+    if (!ft) return noaItems[0] ?? null;
+    // Filter: keep only songs whose id timestamp >= program ft
+    for (const song of noaItems) {
+      const m = song.id.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
+      if (!m) continue;
+      const songTime = m[1] + m[2] + m[3] + m[4] + m[5] + m[6];
+      if (songTime >= ft) return song;
+    }
+    return null;
+  }, [isLivePlaying, noaItems, currentInfo?.ft]);
   const song = nowPlayingSong || (latestSong?.title ? latestSong : null);
   if (!song) return null;
 
