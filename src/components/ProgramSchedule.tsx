@@ -379,20 +379,20 @@ function ProgramDetail({
         <img
           src={station.logoUrl}
           alt={station.name}
-          className="w-12 h-12 rounded-xl object-contain bg-white border border-gray-100 dark:border-gray-700 flex-shrink-0"
+          className="w-11 h-11 rounded-lg object-contain bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex-shrink-0 p-1"
         />
         <div className="flex-1 min-w-0">
-          <h1 className="text-lg font-bold truncate">{station.name}</h1>
+          <h1 className="text-base font-bold truncate">{station.name}</h1>
           {station.asciiName && (
-            <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{station.asciiName}</p>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">{station.asciiName}</p>
           )}
         </div>
         <button
           onClick={onPlayLive}
-          className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-sm font-medium transition-colors flex-shrink-0 ${
+          className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-sm font-medium transition-all flex-shrink-0 shadow-sm ${
             isStationLive
-              ? 'bg-red-500 text-white'
-              : 'bg-blue-500 text-white hover:bg-blue-600'
+              ? 'bg-red-500 text-white shadow-red-200 dark:shadow-red-900/30'
+              : 'bg-blue-500 text-white hover:bg-blue-600 shadow-blue-200 dark:shadow-blue-900/30'
           }`}
         >
           {isStationLive ? (
@@ -414,60 +414,77 @@ function ProgramDetail({
       {/* Now playing song bar — isolated component to avoid time-tick re-renders */}
       <NowPlayingSongBar playingSongs={playingSongs} noaItems={noaItems} stationId={stationId} />
 
-      {/* Divider */}
-      <div className="border-t border-gray-200 dark:border-gray-700" />
-
       {/* Selected program detail */}
       {program ? (
         <div className="flex flex-col gap-4">
-          {/* Program header: image + info */}
-          <div className="flex gap-3 sm:gap-4">
-            {program.imageUrl ? (
-              <img
-                src={program.imageUrl}
-                alt=""
-                className="w-20 h-20 sm:w-24 sm:h-24 md:w-32 md:h-32 rounded-lg object-cover flex-shrink-0 bg-gray-100 dark:bg-gray-800"
-              />
-            ) : (
-              <div className="w-20 h-20 sm:w-24 sm:h-24 md:w-32 md:h-32 rounded-lg flex-shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
-                <svg className="w-8 h-8 sm:w-10 sm:h-10 text-gray-300 dark:text-gray-600" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM8 15l2.5-3.21 1.79 2.15 2.5-3.22L19 15H5l3 0z" />
-                </svg>
-              </div>
-            )}
-            <div className="flex-1 min-w-0 flex flex-col gap-1.5">
-              <div className="flex items-start gap-2">
-                <h2 className="text-base sm:text-lg font-bold leading-tight flex-1">{program.title}</h2>
-                {program.isOnAir && (
-                  <span className="text-[10px] font-bold bg-red-500 text-white px-1.5 py-0.5 rounded flex-shrink-0 mt-0.5">
+          {/* Top section: image left, info right */}
+          <div className="flex flex-col sm:flex-row gap-4">
+            {/* Program image - constrained width, 8:5 ratio */}
+            <div className="relative rounded-xl overflow-hidden bg-gray-100 dark:bg-gray-800 flex-shrink-0 w-full sm:w-[240px] md:w-[300px] lg:w-[356px]">
+              {program.imageUrl ? (
+                <div className="aspect-[8/5] w-full">
+                  <img
+                    src={program.imageUrl}
+                    alt=""
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              ) : (
+                <div className="aspect-[8/5] w-full flex items-center justify-center">
+                  <svg className="w-12 h-12 text-gray-300 dark:text-gray-600" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM8 15l2.5-3.21 1.79 2.15 2.5-3.22L19 15H5l3 0z" />
+                  </svg>
+                </div>
+              )}
+              {/* On-air badge overlay */}
+              {program.isOnAir && (
+                <div className="absolute top-2 left-2">
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-red-500 text-white px-1.5 py-0.5 rounded-md shadow-lg">
+                    <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
                     LIVE
                   </span>
-                )}
-              </div>
+                </div>
+              )}
+            </div>
+
+            {/* Program info - right side */}
+            <div className="flex flex-col gap-1.5 flex-1 min-w-0">
+              <h2 className="text-lg font-bold leading-snug">{program.title}</h2>
               {program.subtitle && (
-                <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2">{program.subtitle}</p>
+                <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">{program.subtitle}</p>
               )}
               {program.performer && (
-                <p className="text-sm text-gray-500 dark:text-gray-400">{program.performer}</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                  <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+                  </svg>
+                  {program.performer}
+                </p>
               )}
-              <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 font-mono">
-                <span>{formatTime(program.startTime)} - {formatTime(program.endTime)}</span>
-                <span className="text-gray-300 dark:text-gray-600">|</span>
+              <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+                <span className="inline-flex items-center gap-1">
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z" />
+                  </svg>
+                  <span className="font-mono">{formatTime(program.startTime)} – {formatTime(program.endTime)}</span>
+                </span>
+                <span className="text-gray-300 dark:text-gray-600">·</span>
                 <span>{formatDuration(program.duration)}</span>
               </div>
-              {/* Play button */}
+
+              {/* Play buttons */}
               {(program.isTimefree || program.isOnAir) && (
-                <div className="mt-1">
+                <div className="flex flex-wrap gap-2 mt-1">
                   {program.isOnAir ? (
                     <button
                       onClick={onPlayLive}
-                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                      className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all shadow-sm ${
                         isStationLive
-                          ? 'bg-red-500 text-white'
-                          : 'bg-blue-500 text-white hover:bg-blue-600'
+                          ? 'bg-red-500 text-white shadow-red-200 dark:shadow-red-900/30'
+                          : 'bg-blue-500 text-white hover:bg-blue-600 shadow-blue-200 dark:shadow-blue-900/30'
                       }`}
                     >
-                      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M8 5v14l11-7z" />
                       </svg>
                       {isStationLive ? 'Listening Live' : 'Listen Live'}
@@ -475,17 +492,31 @@ function ProgramDetail({
                   ) : program.isTimefree && (
                     <button
                       onClick={() => onPlayTimefree(program)}
-                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                      className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all shadow-sm ${
                         isThisProgramPlaying
-                          ? 'bg-blue-500 text-white'
+                          ? 'bg-blue-500 text-white shadow-blue-200 dark:shadow-blue-900/30'
                           : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-blue-500 hover:text-white'
                       }`}
                     >
-                      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M8 5v14l11-7z" />
                       </svg>
                       {isThisProgramPlaying ? 'Playing' : 'Timefree'}
                     </button>
+                  )}
+                  {/* Program link */}
+                  {program.url && (
+                    <a
+                      href={program.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z" />
+                      </svg>
+                      Website
+                    </a>
                   )}
                 </div>
               )}
@@ -494,7 +525,7 @@ function ProgramDetail({
 
           {/* Program description / info */}
           {(program.description || program.info) && (
-            <div className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed space-y-2">
+            <div className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed space-y-2 border-t border-gray-100 dark:border-gray-800 pt-4">
               {program.description && (
                 <div dangerouslySetInnerHTML={{ __html: program.description }} className="program-html" />
               )}
@@ -502,21 +533,6 @@ function ProgramDetail({
                 <div dangerouslySetInnerHTML={{ __html: program.info }} className="program-html" />
               )}
             </div>
-          )}
-
-          {/* Program link */}
-          {program.url && (
-            <a
-              href={program.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-sm text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300"
-            >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z" />
-              </svg>
-              Program website
-            </a>
           )}
 
           {/* Song list */}
@@ -528,8 +544,8 @@ function ProgramDetail({
           />
         </div>
       ) : (
-        <div className="text-center py-10 text-gray-400 dark:text-gray-500">
-          <svg className="w-12 h-12 mx-auto mb-3 text-gray-300 dark:text-gray-600" viewBox="0 0 24 24" fill="currentColor">
+        <div className="text-center py-16 text-gray-400 dark:text-gray-500">
+          <svg className="w-16 h-16 mx-auto mb-4 text-gray-200 dark:text-gray-700" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
           </svg>
           <p className="text-sm">Select a program from the schedule</p>
@@ -575,7 +591,7 @@ function ScheduleList({
           <div
             key={program.id}
             ref={program.isOnAir && isToday ? onAirRef : undefined}
-            className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-2 cursor-pointer transition-colors border-l-2 ${
+            className={`flex items-center gap-2 px-2 sm:px-3 py-1.5 cursor-pointer transition-colors border-l-2 ${
               isSelected
                 ? 'border-l-blue-500 bg-blue-50 dark:bg-blue-950/20'
                 : program.isOnAir
@@ -586,15 +602,26 @@ function ScheduleList({
             }`}
             onClick={() => onSelectProgram(program)}
           >
-            {/* Time */}
-            <div className="flex-shrink-0 w-9 sm:w-10 text-center">
-              <span className="text-[11px] font-mono text-gray-500 dark:text-gray-400 leading-none">
+            {/* Thumbnail */}
+            {program.imageUrl ? (
+              <img
+                src={program.imageUrl}
+                alt=""
+                className="w-14 h-[35px] rounded object-cover flex-shrink-0 bg-gray-100 dark:bg-gray-800"
+              />
+            ) : (
+              <div className="w-14 h-[35px] rounded flex-shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
+                <svg className="w-4 h-4 text-gray-300 dark:text-gray-600" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM8 15l2.5-3.21 1.79 2.15 2.5-3.22L19 15H5l3 0z" />
+                </svg>
+              </div>
+            )}
+
+            {/* Time + Title + performer */}
+            <div className="flex-1 min-w-0">
+              <span className="text-[10px] font-mono text-gray-400 dark:text-gray-500 leading-none">
                 {formatTime(program.startTime)}
               </span>
-            </div>
-
-            {/* Title + performer */}
-            <div className="flex-1 min-w-0">
               <p className="text-xs font-medium truncate leading-tight">{program.title}</p>
               {program.performer && (
                 <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate leading-tight">
@@ -611,14 +638,14 @@ function ScheduleList({
               {program.isTimefree && (
                 <button
                   onClick={(e) => { e.stopPropagation(); onPlayTimefree(program); }}
-                  className={`w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center rounded-full transition-colors ${
+                  className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors ${
                     isNowPlaying
                       ? 'bg-blue-500 text-white'
                       : 'text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30'
                   }`}
                   title="Play timefree"
                 >
-                  <svg className="w-2.5 h-2.5 sm:w-3 sm:h-3" viewBox="0 0 24 24" fill="currentColor">
+                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M8 5v14l11-7z" />
                   </svg>
                 </button>
@@ -1009,6 +1036,10 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
       ft: onAir?.startTime,
       to: onAir?.endTime,
     });
+    // Select the on-air program if found
+    if (onAir) {
+      setSelectedProgramId(onAir.id);
+    }
     // Clear timefree params from URL
     window.history.replaceState(null, '', window.location.pathname);
   }, [data, playLive]);
@@ -1016,6 +1047,7 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
   const handlePlayTimefree = useCallback(
     (program: Program) => {
       if (!data) return;
+      // Start playback
       playTimefree({
         stationId: data.station.id,
         stationName: data.station.name,
@@ -1027,6 +1059,8 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
         to: program.endTime,
         duration: program.duration,
       });
+      // Select the program so details are shown on the left
+      setSelectedProgramId(program.id);
       // Update URL with timefree params
       const params = new URLSearchParams({ ft: program.startTime });
       window.history.replaceState(null, '', `${window.location.pathname}?${params}`);
