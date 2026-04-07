@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { usePlayer, usePlayerTime } from '@/lib/player-context';
-import { formatTime } from '@/lib/radiko-parser';
+import { formatTime, parseRadikoDate } from '@/lib/radiko-parser';
 
 interface Program {
   id: string;
@@ -677,6 +677,44 @@ function ScheduleDrawer({
   );
 }
 
+// --- URL sync component (isolated to avoid high-frequency re-renders in parent) ---
+// Updates the browser URL with the current playback position every 10s.
+// Works for both timefree and behind-live modes.
+function UrlSync({ stationId }: { stationId: string }) {
+  const { currentInfo, isPlaying, isBehindLive } = usePlayer();
+  const { currentTime } = usePlayerTime();
+  const lastWrittenRef = useRef(0);
+
+  useEffect(() => {
+    if (!isPlaying || !currentInfo || currentInfo.stationId !== stationId) return;
+    const ft = currentInfo.ft;
+    if (!ft) return;
+
+    // Write URL for timefree playback or behind-live seek-back
+    const shouldWrite =
+      currentInfo.type === 'timefree' ||
+      (currentInfo.type === 'live' && isBehindLive);
+
+    if (!shouldWrite) {
+      // Live at edge: clear any lingering params
+      if (currentInfo.type === 'live' && window.location.search) {
+        window.history.replaceState(null, '', window.location.pathname);
+      }
+      return;
+    }
+
+    const t = Math.floor(currentTime);
+    // Throttle: only write if at least 10s since last write and position changed meaningfully
+    if (Math.abs(t - lastWrittenRef.current) < 10) return;
+    lastWrittenRef.current = t;
+
+    const params = new URLSearchParams({ ft, ...(t > 0 ? { t: String(t) } : {}) });
+    window.history.replaceState(null, '', `${window.location.pathname}?${params}`);
+  }, [isPlaying, currentInfo, stationId, currentTime, isBehindLive]);
+
+  return null;
+}
+
 // --- Main component ---
 export default function ProgramSchedule({ stationId }: { stationId: string }) {
   const { dates, todayStr } = useMemo(() => {
@@ -695,12 +733,24 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
   const [noaItems, setNoaItems] = useState<NoaItem[]>([]);
   const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const { playLive, playTimefree, currentInfo, isPlaying, isBehindLive } = usePlayer();
+  const { playLive, playTimefree, seek, seekLive, currentInfo, isPlaying, isBehindLive } = usePlayer();
 
   const scheduleRef = useRef<HTMLDivElement>(null);
   const onAirRef = useRef<HTMLDivElement>(null);
   const hasScrolledRef = useRef(false);
+  const deepLinkRef = useRef<{ ft: string; t?: number } | null>(null);
+  const lastLiveFtRef = useRef<string | null>(null);
   const selectedProgram = data?.programs.find((p) => p.id === selectedProgramId) || null;
+
+  // Read deep-link params from URL on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const ft = params.get('ft');
+    if (ft) {
+      const t = params.get('t');
+      deepLinkRef.current = { ft, t: t ? parseInt(t, 10) : undefined };
+    }
+  }, []);
 
   // Fetch program schedule
   useEffect(() => {
@@ -713,7 +763,39 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
       .then((d) => {
         if (d.error) throw new Error(d.error);
         setData(d);
-        // Auto-select on-air program for today, or first program for past dates
+
+        const dl = deepLinkRef.current;
+        if (dl) {
+          // Deep-link: find the program whose time range contains ft
+          const match = d.programs?.find((p: Program) => p.startTime === dl.ft)
+            || d.programs?.find((p: Program) => p.startTime <= dl.ft && dl.ft < p.endTime);
+          if (match) {
+            setSelectedProgramId(match.id);
+            return; // auto-play handled by separate effect after data is set
+          }
+          // If not found on this date, the deep-link ft may belong to a different broadcast date.
+          // Extract the broadcast date from ft (radiko day starts at 05:00 JST).
+          const h = parseInt(dl.ft.substring(8, 10), 10);
+          const dateFromFt = h < 5
+            ? // Before 05:00 belongs to previous calendar day's broadcast
+              (() => {
+                const y = parseInt(dl.ft.substring(0, 4), 10);
+                const m = parseInt(dl.ft.substring(4, 6), 10) - 1;
+                const day = parseInt(dl.ft.substring(6, 8), 10);
+                const prev = new Date(y, m, day - 1);
+                return `${prev.getFullYear()}${String(prev.getMonth() + 1).padStart(2, '0')}${String(prev.getDate()).padStart(2, '0')}`;
+              })()
+            : dl.ft.substring(0, 8);
+          if (dateFromFt !== selectedDate) {
+            // Switch to the correct date — this effect will re-run
+            setSelectedDate(dateFromFt);
+            return;
+          }
+          // Program not found even on correct date — clear deep-link, fall through
+          deepLinkRef.current = null;
+        }
+
+        // Default: auto-select on-air program for today, or first program for past dates
         if (selectedDate === todayStr) {
           const onAir = d.programs?.find((p: Program) => p.isOnAir);
           setSelectedProgramId(onAir?.id || d.programs?.[0]?.id || null);
@@ -724,6 +806,55 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [stationId, selectedDate, todayStr]);
+
+  // Deep-link auto-play: once data loads and the matching program is selected,
+  // trigger playback. If the program is currently on-air, start live + seek back;
+  // otherwise start timefree.
+  useEffect(() => {
+    const dl = deepLinkRef.current;
+    if (!dl || !data || !selectedProgram) return;
+    // Match: ft is exact program start, or ft falls within the selected program's range
+    const inRange = selectedProgram.startTime <= dl.ft && dl.ft < selectedProgram.endTime;
+    if (selectedProgram.startTime !== dl.ft && !inRange) return;
+    // Consume deep-link so it only fires once
+    const seekTo = dl.t;
+    deepLinkRef.current = null;
+
+    if (selectedProgram.isOnAir && seekTo && seekTo > 0) {
+      // Program is currently on-air: start live then seek back to the saved position
+      playLive({
+        stationId: data.station.id,
+        stationName: data.station.name,
+        stationLogo: data.station.logoUrl,
+        type: 'live',
+        title: selectedProgram.title,
+        performer: selectedProgram.performer || data.station.name,
+        ft: selectedProgram.startTime,
+        to: selectedProgram.endTime,
+      });
+      const timer = setTimeout(() => seekLive(seekTo), 1500);
+      return () => clearTimeout(timer);
+    }
+
+    // Ended program or no seek position: use timefree
+    playTimefree({
+      stationId: data.station.id,
+      stationName: data.station.name,
+      stationLogo: data.station.logoUrl,
+      type: 'timefree',
+      title: selectedProgram.title,
+      performer: selectedProgram.performer || data.station.name,
+      ft: selectedProgram.startTime,
+      to: selectedProgram.endTime,
+      duration: selectedProgram.duration,
+    });
+    // Seek to specific position after a short delay (wait for stream to load)
+    if (seekTo && seekTo > 0) {
+      const timer = setTimeout(() => seek(seekTo), 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [data, selectedProgram, playLive, playTimefree, seek, seekLive]);
+
 
   // Fetch NOA (now-on-air) for live display.
   // Only poll when viewing today AND the selected program is on-air (60s interval).
@@ -772,18 +903,32 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
   // When live program transitions (player-context updates currentInfo.ft),
   // immediately switch the selected program and on-air flags so the detail
   // view reflects the new program without waiting for the 60s interval.
+  // We use a ref to track the last ft so we only act on real transitions,
+  // NOT when the user manually selects a different program.
   useEffect(() => {
     if (!data || selectedDate !== todayStr) return;
     if (!isPlaying || currentInfo?.stationId !== stationId || currentInfo?.type !== 'live') return;
     const ft = currentInfo.ft;
     if (!ft) return;
+    // Only act when ft actually changed (real live transition)
+    if (ft === lastLiveFtRef.current) return;
+    lastLiveFtRef.current = ft;
     const match = data.programs.find((p) => p.startTime === ft);
-    if (!match || match.id === selectedProgramId) return;
-    // Update isOnAir flags and switch selection
-    const updated = data.programs.map((p) => ({ ...p, isOnAir: p.id === match.id }));
+    if (!match) return;
+    // Update isOnAir flags and recompute isTimefree for the transitioning program.
+    // The previously on-air program has just ended and should now be timefree-eligible.
+    const now = new Date();
+    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const updated = data.programs.map((p) => {
+      const isOnAir = p.id === match.id;
+      // Recompute isTimefree: program ended (not on-air) and within 7-day window
+      const endDate = parseRadikoDate(p.endTime);
+      const isTimefree = !isOnAir && endDate < now && endDate > oneWeekAgo;
+      return { ...p, isOnAir, isTimefree };
+    });
     setData({ ...data, programs: updated });
     setSelectedProgramId(match.id);
-  }, [currentInfo?.ft, currentInfo?.stationId, currentInfo?.type, isPlaying, data, selectedDate, todayStr, stationId, selectedProgramId]);
+  }, [currentInfo?.ft, currentInfo?.stationId, currentInfo?.type, isPlaying, data, selectedDate, todayStr, stationId]);
 
   // Auto-scroll to on-air program in schedule (centered)
   useEffect(() => {
@@ -851,6 +996,8 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
       ft: onAir?.startTime,
       to: onAir?.endTime,
     });
+    // Clear timefree params from URL
+    window.history.replaceState(null, '', window.location.pathname);
   }, [data, playLive]);
 
   const handlePlayTimefree = useCallback(
@@ -867,6 +1014,9 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
         to: program.endTime,
         duration: program.duration,
       });
+      // Update URL with timefree params
+      const params = new URLSearchParams({ ft: program.startTime });
+      window.history.replaceState(null, '', `${window.location.pathname}?${params}`);
     },
     [data, playTimefree]
   );
@@ -929,6 +1079,7 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
 
   return (
     <>
+      <UrlSync stationId={stationId} />
       <div className="flex flex-1 lg:min-h-0 gap-0 lg:gap-6">
         {/* === Left: Program detail (main area) === */}
         {/* Mobile: flows with document scroll for pull-to-refresh. Desktop: internal scroll for dual-pane layout. */}
