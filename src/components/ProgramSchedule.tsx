@@ -126,18 +126,46 @@ function isRealImage(url: string): boolean {
 }
 
 // --- Song list for a program's detail view ---
-function SongList({ stationId, ft, to, compact }: { stationId: string; ft: string; to: string; compact?: boolean }) {
+// When `liveNoaItems` is provided (on-air program), those are shown directly
+// and kept up-to-date by the parent's 60s NOA polling.  For past programs the
+// component does a one-time fetch using the ft/to time range.
+function SongList({ stationId, ft, to, compact, liveNoaItems }: {
+  stationId: string; ft: string; to: string; compact?: boolean; liveNoaItems?: NoaItem[];
+}) {
   const [songs, setSongs] = useState<NoaItem[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Use live NOA items when available (on-air program)
+  const isLive = !!liveNoaItems;
+
   useEffect(() => {
+    if (isLive) {
+      // On-air: data comes from parent via liveNoaItems prop
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     fetch(`/api/noa?stationId=${stationId}&ft=${ft}&to=${to}`)
       .then((r) => r.json())
       .then((d) => setSongs(d.items || []))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [stationId, ft, to]);
+  }, [stationId, ft, to, isLive]);
+
+  // For live data, filter out songs from previous programs.
+  // The id field is like "2026-04-07T11:46:43-YFM" — extract time part and
+  // compare with the program's ft (YYYYMMDDHHmmss) to drop songs before this program.
+  const displaySongs = useMemo(() => {
+    const raw = isLive ? (liveNoaItems || []) : songs;
+    if (!isLive || !ft) return raw;
+    return raw.filter((song) => {
+      // id: "2026-04-07T11:46:43-YFM" -> "20260407114643"
+      const m = song.id.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
+      if (!m) return true;
+      const songTime = m[1] + m[2] + m[3] + m[4] + m[5] + m[6];
+      return songTime >= ft;
+    });
+  }, [isLive, liveNoaItems, songs, ft]);
 
   if (loading) {
     return (
@@ -150,15 +178,17 @@ function SongList({ stationId, ft, to, compact }: { stationId: string; ft: strin
     );
   }
 
-  if (songs.length === 0) return null;
+  if (displaySongs.length === 0) return null;
 
-  // Show newest songs first
-  const sorted = [...songs].reverse();
+  // Show newest songs first — sort by stamp descending so the order is
+  // consistent regardless of API endpoint (live returns newest-first,
+  // timefree returns oldest-first).
+  const sorted = [...displaySongs].sort((a, b) => (b.stamp > a.stamp ? 1 : b.stamp < a.stamp ? -1 : 0));
 
   return (
     <div className="space-y-1">
       <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
-        Songs ({songs.length})
+        Songs ({displaySongs.length})
       </h3>
       {sorted.map((song) => (
         <div key={song.id} className={`flex items-start gap-2.5 ${compact ? 'py-1.5' : 'py-2'}`}>
@@ -224,7 +254,9 @@ function NowPlayingSongBar({
     return findSongAtTime(playingSongs, ft, currentTime);
   }, [playingSongs, currentInfo, stationId, isPlaying, isBehindLive, currentTime]);
 
-  const latestSong = noaItems.length > 0 ? noaItems[0] : null;
+  const isLivePlaying = currentInfo?.stationId === stationId && isPlaying &&
+    currentInfo?.type === 'live' && !isBehindLive;
+  const latestSong = isLivePlaying && noaItems.length > 0 ? noaItems[0] : null;
   const song = nowPlayingSong || (latestSong?.title ? latestSong : null);
   if (!song) return null;
 
@@ -475,7 +507,12 @@ function ProgramDetail({
           )}
 
           {/* Song list */}
-          <SongList stationId={stationId} ft={program.startTime} to={program.endTime} />
+          <SongList
+            stationId={stationId}
+            ft={program.startTime}
+            to={program.endTime}
+            liveNoaItems={program.isOnAir ? noaItems : undefined}
+          />
         </div>
       ) : (
         <div className="text-center py-10 text-gray-400 dark:text-gray-500">
@@ -663,6 +700,7 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
   const scheduleRef = useRef<HTMLDivElement>(null);
   const onAirRef = useRef<HTMLDivElement>(null);
   const hasScrolledRef = useRef(false);
+  const selectedProgram = data?.programs.find((p) => p.id === selectedProgramId) || null;
 
   // Fetch program schedule
   useEffect(() => {
@@ -687,8 +725,12 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
       .finally(() => setLoading(false));
   }, [stationId, selectedDate, todayStr]);
 
-  // Fetch NOA (now-on-air) for live display, poll every 30s
+  // Fetch NOA (now-on-air) for live display.
+  // Only poll when viewing today AND the selected program is on-air (60s interval).
+  const selectedIsOnAir = selectedProgram?.isOnAir ?? false;
+  const shouldPollNoa = selectedDate === todayStr && selectedIsOnAir;
   useEffect(() => {
+    if (!shouldPollNoa) return;
     let active = true;
     const fetchNoa = () => {
       fetch(`/api/noa?stationId=${stationId}`)
@@ -699,9 +741,9 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
         .catch(() => {});
     };
     fetchNoa();
-    const interval = setInterval(fetchNoa, 30000);
+    const interval = setInterval(fetchNoa, 60000);
     return () => { active = false; clearInterval(interval); };
-  }, [stationId]);
+  }, [stationId, shouldPollNoa]);
 
   // Fetch song list for the currently playing timefree/behind-live program
   const [playingSongs, setPlayingSongs] = useState<NoaItem[]>([]);
@@ -726,6 +768,22 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
       .catch(() => {});
     return () => { active = false; };
   }, [stationId, currentInfo, isPlaying, isBehindLive]);
+
+  // When live program transitions (player-context updates currentInfo.ft),
+  // immediately switch the selected program and on-air flags so the detail
+  // view reflects the new program without waiting for the 60s interval.
+  useEffect(() => {
+    if (!data || selectedDate !== todayStr) return;
+    if (!isPlaying || currentInfo?.stationId !== stationId || currentInfo?.type !== 'live') return;
+    const ft = currentInfo.ft;
+    if (!ft) return;
+    const match = data.programs.find((p) => p.startTime === ft);
+    if (!match || match.id === selectedProgramId) return;
+    // Update isOnAir flags and switch selection
+    const updated = data.programs.map((p) => ({ ...p, isOnAir: p.id === match.id }));
+    setData({ ...data, programs: updated });
+    setSelectedProgramId(match.id);
+  }, [currentInfo?.ft, currentInfo?.stationId, currentInfo?.type, isPlaying, data, selectedDate, todayStr, stationId, selectedProgramId]);
 
   // Auto-scroll to on-air program in schedule (centered)
   useEffect(() => {
@@ -821,7 +879,6 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
   const isToday = selectedDate === todayStr;
   const isStationLive =
     currentInfo?.stationId === stationId && isPlaying && currentInfo?.type === 'live';
-  const selectedProgram = data?.programs.find((p) => p.id === selectedProgramId) || null;
 
   // Date selector + schedule list (shared between sidebar and drawer)
   const scheduleContent = (
