@@ -48,12 +48,12 @@ export default function RootLayout({
   return (
     <html
       lang="ja"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} min-h-full antialiased`}
     >
-      <body className="h-full flex flex-col overflow-hidden bg-background text-foreground">
+      <body className="min-h-full flex flex-col bg-background text-foreground">
         <PlayerProvider>
-          {/* Header - fixed height, never scrolls */}
-          <header className="flex-shrink-0 z-40 pt-safe bg-white/80 dark:bg-gray-900/80 backdrop-blur border-b border-gray-200 dark:border-gray-800">
+          {/* Header - sticky at top */}
+          <header className="flex-shrink-0 z-40 pt-safe bg-white/80 dark:bg-gray-900/80 backdrop-blur border-b border-gray-200 dark:border-gray-800 sticky top-0">
             <div className="max-w-screen-xl mx-auto px-4 pl-safe pr-safe h-14 flex items-center">
               <Link href="/" className="flex items-center gap-2">
                 <svg className="w-7 h-7 text-blue-500" viewBox="0 0 24 24" fill="currentColor">
@@ -64,8 +64,8 @@ export default function RootLayout({
             </div>
           </header>
 
-          {/* Main content - fills remaining height, no scroll itself */}
-          <main className="flex-1 min-h-0 flex flex-col">
+          {/* Main content */}
+          <main className="flex-1 flex flex-col">
             {children}
           </main>
 

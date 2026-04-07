@@ -929,10 +929,11 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
 
   return (
     <>
-      <div className="flex flex-1 min-h-0 gap-0 lg:gap-6">
+      <div className="flex flex-1 lg:min-h-0 gap-0 lg:gap-6">
         {/* === Left: Program detail (main area) === */}
+        {/* Mobile: flows with document scroll for pull-to-refresh. Desktop: internal scroll for dual-pane layout. */}
         <div
-          className="flex-1 min-w-0 overflow-y-auto pr-0 lg:pr-2 pt-2"
+          className="flex-1 min-w-0 lg:overflow-y-auto pr-0 lg:pr-2 pt-2"
           style={{ paddingBottom: 'var(--player-bar-h, 0px)' }}
         >
           <ProgramDetail
