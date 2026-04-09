@@ -60,6 +60,14 @@ Vercel's serverless functions handle the API routes natively.
 
 Next.js can be deployed to Cloudflare Workers using [OpenNext for Cloudflare](https://opennext.js.org/cloudflare):
 
+Before previewing or deploying, create and/or rename the resources referenced by `wrangler.jsonc` so they match your environment.
+The checked-in config currently expects:
+
+1. A Worker/service named `yar`
+2. An R2 bucket named `yar-opennext-cache`
+
+If you use different names, update `wrangler.jsonc` before running the commands below.
+
 ```bash
 # Preview locally
 npm run preview
@@ -105,6 +113,9 @@ src/
     ├── player-context.tsx       # Global player state (hls.js, Media Session)
     ├── radiko-auth.ts           # Android auth module
     ├── radiko-parser.ts         # XML parsing, station-to-area mapping
+    ├── radiko-stream.ts         # Stream XML playlist URL extraction
+    ├── request-validation.ts    # Shared input validation helpers
+    ├── stream-signing.ts        # Stateless signed proxy URL generation
     ├── storage.ts               # localStorage persistence
     └── auth-key-data.ts         # Android auth key (base64 constant)
 ```

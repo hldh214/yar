@@ -530,10 +530,10 @@ const ProgramDetail = memo(function ProgramDetail({
           {(program.description || program.info) && (
             <div className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed space-y-2 border-t border-gray-100 dark:border-gray-800 pt-4">
               {program.description && (
-                <div dangerouslySetInnerHTML={{ __html: program.description }} className="program-html" />
+                <div className="whitespace-pre-wrap break-words">{program.description}</div>
               )}
               {program.info && (
-                <div dangerouslySetInnerHTML={{ __html: program.info }} className="program-html" />
+                <div className="whitespace-pre-wrap break-words">{program.info}</div>
               )}
             </div>
           )}
@@ -1011,20 +1011,24 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
       let changed = false;
       const updated = data.programs.map((p) => {
         const isOnAir = p.startTime <= nowStr && nowStr < p.endTime;
-        if (isOnAir !== p.isOnAir) changed = true;
-        return { ...p, isOnAir };
+        const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        const endDate = parseRadikoDate(p.endTime);
+        const isTimefree = !isOnAir && endDate < now && endDate > oneWeekAgo;
+        if (isOnAir !== p.isOnAir || isTimefree !== p.isTimefree) changed = true;
+        return { ...p, isOnAir, isTimefree };
       });
       if (changed) {
         setData({ ...data, programs: updated });
         // Update selected program to new on-air if current selection was on-air
+        const previouslySelected = data.programs.find((p) => p.id === selectedProgramId);
         const newOnAir = updated.find((p) => p.isOnAir);
-        if (newOnAir) {
+        if (newOnAir && previouslySelected?.isOnAir) {
           setSelectedProgramId(newOnAir.id);
         }
       }
     }, 60000);
     return () => clearInterval(interval);
-  }, [selectedDate, todayStr, data]);
+  }, [selectedDate, todayStr, data, selectedProgramId]);
 
   const handlePlayLive = useCallback(() => {
     if (!data) return;

@@ -348,8 +348,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     [destroyHls, updateMediaSession]
   );
 
-  // Helper: fetch timefree playlist URL with optional seek
-  // Returns { proxyUrl, areaId } where areaId comes from the stream API
+  // Helper: fetch timefree proxy URL with optional seek
   const fetchTimefreeProxyUrl = useCallback(
     async (info: PlaybackInfo, seekTime?: number): Promise<string> => {
       const params = new URLSearchParams({
@@ -365,24 +364,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       const res = await fetch(`/api/stream/timefree?${params}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      const proxyParams = new URLSearchParams({ url: btoa(data.playlistUrl) });
-      if (data.areaId) proxyParams.set('areaId', data.areaId);
-      return `/api/stream/proxy?${proxyParams}`;
+      return data.proxyUrl;
     },
     []
   );
 
-  // Helper: fetch live playlist URL
-  // Returns proxy URL with areaId from the stream API response
+  // Helper: fetch live proxy URL
   const fetchLiveProxyUrl = useCallback(
     async (info: PlaybackInfo): Promise<string> => {
       const params = new URLSearchParams({ stationId: info.stationId });
       const res = await fetch(`/api/stream/live?${params}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      const proxyParams = new URLSearchParams({ url: btoa(data.playlistUrl) });
-      if (data.areaId) proxyParams.set('areaId', data.areaId);
-      return `/api/stream/proxy?${proxyParams}`;
+      return data.proxyUrl;
     },
     []
   );
@@ -470,9 +464,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           if (seekIdRef.current !== thisSeekId) return;
           const data = await res.json();
           if (data.error) throw new Error(data.error);
-          const proxyParams = new URLSearchParams({ url: btoa(data.playlistUrl) });
-          if (data.areaId) proxyParams.set('areaId', data.areaId);
-          const proxyUrl = `/api/stream/proxy?${proxyParams}`;
+          const proxyUrl = data.proxyUrl;
           if (seekIdRef.current !== thisSeekId) return;
           await loadHlsStream(proxyUrl, info, pausedAt);
           setIsBehindLive(true);
@@ -534,9 +526,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             const data = await res.json();
             if (data.error) throw new Error(data.error);
 
-            const proxyParams = new URLSearchParams({ url: btoa(data.playlistUrl) });
-            if (data.areaId) proxyParams.set('areaId', data.areaId);
-            const proxyUrl = `/api/stream/proxy?${proxyParams}`;
+            const proxyUrl = data.proxyUrl;
             if (seekIdRef.current !== thisSeekId) return;
 
             await loadHlsStream(proxyUrl, info, clampedTime);
@@ -614,9 +604,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           const data = await res.json();
           if (data.error) throw new Error(data.error);
 
-          const proxyParams = new URLSearchParams({ url: btoa(data.playlistUrl) });
-          if (data.areaId) proxyParams.set('areaId', data.areaId);
-          const proxyUrl = `/api/stream/proxy?${proxyParams}`;
+          const proxyUrl = data.proxyUrl;
           if (seekIdRef.current !== thisSeekId) return;
 
           // Load as the original live info (keep type=live), but set seekOffset

@@ -49,10 +49,37 @@ function decodeXmlEntities(str: string): string {
     .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
 }
 
+function unwrapCdata(str: string): string {
+  const cdataMatch = str.match(/^<!\[CDATA\[([\s\S]*?)\]\]>$/i);
+  return cdataMatch ? cdataMatch[1] : str;
+}
+
+function htmlToPlainText(str: string): string {
+  return decodeXmlEntities(str)
+    .replace(/<\s*br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|section|article|h\d)>/gi, "\n")
+    .replace(/<li[^>]*>/gi, "- ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function sanitizeExternalUrl(url: string): string {
+  if (!url) return "";
+
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
 function getTextContent(parent: string, tag: string): string {
   const regex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, "i");
   const match = parent.match(regex);
-  return match ? decodeXmlEntities(match[1].trim()) : "";
+  return match ? decodeXmlEntities(unwrapCdata(match[1].trim())) : "";
 }
 
 function getAttr(tag: string, attr: string): string {
@@ -137,10 +164,10 @@ export function parseProgramsXml(xml: string): StationWithPrograms[] {
         const title = getTextContent(pBlock, "title");
         const subtitle = getTextContent(pBlock, "sub_title");
         const performer = getTextContent(pBlock, "pfm");
-        const desc = getTextContent(pBlock, "desc");
-        const info = getTextContent(pBlock, "info");
-        const url = getTextContent(pBlock, "url");
-        const img = getTextContent(pBlock, "img");
+        const desc = htmlToPlainText(getTextContent(pBlock, "desc"));
+        const info = htmlToPlainText(getTextContent(pBlock, "info"));
+        const url = sanitizeExternalUrl(getTextContent(pBlock, "url"));
+        const img = sanitizeExternalUrl(getTextContent(pBlock, "img"));
 
         const isOnAir = ft <= nowStr && nowStr < to;
         // Timefree: program has ended and is within 1 week

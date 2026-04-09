@@ -67,27 +67,6 @@ body {
   animation: slide-up 0.3s ease-out;
 }
 
-/* Program HTML content styling (description/info from radiko) */
-.program-html a {
-  color: #3b82f6;
-  text-decoration: underline;
-}
-
-.program-html a:hover {
-  color: #2563eb;
-}
-
-.program-html p {
-  margin-bottom: 0.5rem;
-}
-
-.program-html img {
-  max-width: 100%;
-  height: auto;
-  border-radius: 0.375rem;
-  margin: 0.5rem 0;
-}
-
 /* Safe area insets for notched / edge-to-edge devices */
 .pb-safe {
   padding-bottom: max(1rem, env(safe-area-inset-bottom));

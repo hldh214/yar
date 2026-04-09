@@ -5,6 +5,12 @@
 //   - Live (no ft/to): /music/api/v1/noas/{stationId}/latest?size=20
 //   - Timefree (with ft/to): /music/api/v1/noas/{stationId}?start_time_gte=...&end_time_lt=...
 import { NextRequest } from "next/server";
+import {
+  isChronologicalRange,
+  isValidRadikoTimestamp,
+  isValidStationId,
+  normalizeStationId,
+} from "@/lib/request-validation";
 
 export interface NoaItem {
   title: string;
@@ -16,6 +22,17 @@ export interface NoaItem {
   itunes: string;
   recochoku: string;
   id: string;
+}
+
+function sanitizeExternalUrl(url: string): string {
+  if (!url) return "";
+
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.toString() : "";
+  } catch {
+    return "";
+  }
 }
 
 // Convert radiko YYYYMMDDHHmmss to ISO 8601 JST string
@@ -35,11 +52,11 @@ function mapItems(data: any[]): NoaItem[] {
     title: item.title || "",
     artist: item.artist_name || item.artist?.name || "",
     stamp: item.displayed_start_time || "",
-    img: item.music?.image?.medium || "",
-    imgLarge: item.music?.image?.large || "",
-    amazon: item.music?.shops?.amazon || "",
-    itunes: item.music?.shops?.itunes || "",
-    recochoku: item.music?.shops?.recochoku || "",
+    img: sanitizeExternalUrl(item.music?.image?.medium || ""),
+    imgLarge: sanitizeExternalUrl(item.music?.image?.large || ""),
+    amazon: sanitizeExternalUrl(item.music?.shops?.amazon || ""),
+    itunes: sanitizeExternalUrl(item.music?.shops?.itunes || ""),
+    recochoku: sanitizeExternalUrl(item.music?.shops?.recochoku || ""),
     id: item.id || "",
   }));
 }
@@ -47,15 +64,33 @@ function mapItems(data: any[]): NoaItem[] {
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = request.nextUrl;
-    const stationId = searchParams.get("stationId");
+    const stationIdParam = searchParams.get("stationId");
     const ft = searchParams.get("ft");
     const to = searchParams.get("to");
 
-    if (!stationId) {
+    if (!stationIdParam) {
       return Response.json(
         { error: "stationId is required" },
         { status: 400 }
       );
+    }
+
+    const stationId = normalizeStationId(stationIdParam);
+    if (!isValidStationId(stationId)) {
+      return Response.json({ error: "invalid stationId" }, { status: 400 });
+    }
+
+    if ((ft && !to) || (!ft && to)) {
+      return Response.json({ error: "ft and to must be provided together" }, { status: 400 });
+    }
+
+    if (ft && to) {
+      if (!isValidRadikoTimestamp(ft) || !isValidRadikoTimestamp(to)) {
+        return Response.json({ error: "invalid ft/to" }, { status: 400 });
+      }
+      if (!isChronologicalRange(ft, to)) {
+        return Response.json({ error: "ft must be before to" }, { status: 400 });
+      }
     }
 
     let url: string;

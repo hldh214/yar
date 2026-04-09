@@ -3,20 +3,35 @@
 // areaId is auto-resolved from stationId
 import { NextRequest } from "next/server";
 import { parseProgramsXml, getAreaIdForStation } from "@/lib/radiko-parser";
+import {
+  isValidRadikoDate,
+  isValidStationId,
+  normalizeStationId,
+} from "@/lib/request-validation";
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = request.nextUrl;
-    const stationId = searchParams.get("stationId");
+    const stationIdParam = searchParams.get("stationId");
     const date = searchParams.get("date");
-    const areaId = await getAreaIdForStation(stationId || "");
 
-    if (!stationId) {
+    if (!stationIdParam) {
       return Response.json(
         { error: "stationId is required" },
         { status: 400 }
       );
     }
+
+    const stationId = normalizeStationId(stationIdParam);
+    if (!isValidStationId(stationId)) {
+      return Response.json({ error: "invalid stationId" }, { status: 400 });
+    }
+
+    if (date && !isValidRadikoDate(date)) {
+      return Response.json({ error: "invalid date" }, { status: 400 });
+    }
+
+    const areaId = await getAreaIdForStation(stationId);
 
     // Determine date string
     let dateStr: string;

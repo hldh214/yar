@@ -109,19 +109,96 @@ function genUserId(): string {
     .join("");
 }
 
-// Android device models for User-Agent
-const DEVICES = [
-  { sdk: "34", model: "SC-02H", build: "R16NW" },
-  { sdk: "33", model: "Pixel 7", build: "TQ3A.230805.001" },
-  { sdk: "31", model: "SM-G991B", build: "TP1A.220624.014" },
-  { sdk: "30", model: "SOG01", build: "30.1.E.0.540" },
-];
+const APP_VERSIONS = [
+  "8.2.4",
+  "8.2.2",
+  "8.2.1",
+  "8.2.0",
+  "8.1.11",
+  "8.1.8",
+  "8.1.7",
+  "8.1.6",
+  "8.1.5",
+  "8.1.4",
+  "8.1.2",
+  "8.1.1",
+  "8.1.0",
+  "8.0.16",
+  "8.0.15",
+  "8.0.14",
+  "8.0.12",
+  "8.0.11",
+  "8.0.10",
+  "8.0.9",
+  "8.0.7",
+  "8.0.6",
+  "8.0.5",
+  "8.0.4",
+  "8.0.3",
+  "8.0.2",
+] as const;
 
-function genDevice(): { device: string; userAgent: string } {
-  const d = DEVICES[Math.floor(Math.random() * DEVICES.length)];
+const VERSION_BUILDS: Record<string, { sdk: string; android: string; builds: string[] }> = {
+  "8.0.0": { sdk: "26", android: "8.0.0", builds: ["5650811", "5796467", "5948681", "6107732", "6127070"] },
+  "8.1.0": { sdk: "27", android: "8.1.0", builds: ["5794017", "6107733", "6037697"] },
+  "9.0.0": { sdk: "28", android: "9", builds: ["5948683", "5794013", "6127072"] },
+  "10.0.0": { sdk: "29", android: "10", builds: ["5933585", "6969601", "7023426", "7070703"] },
+  "11.0.0": { sdk: "30", android: "11", builds: ["RP1A.201005.006", "RQ1A.201205.011", "RQ1A.210105.002"] },
+  "12.0.0": { sdk: "31", android: "12", builds: ["SD1A.210817.015.A4", "SD1A.210817.019.B1", "SD1A.210817.037", "SQ1D.220105.007"] },
+  "13.0.0": { sdk: "33", android: "13", builds: ["TQ3C.230805.001.B2", "TQ3A.230805.001.A2", "TQ3A.230705.001.A1", "TQ2B.230505.005.A1"] },
+  "14.0.0": { sdk: "34", android: "14", builds: ["AP2A.240805.005.S4", "AD1A.240905.004", "AP2A.240905.003", "AD1A.240530.047"] },
+  "15.0.0": { sdk: "35", android: "15", builds: ["AP4A.250105.002.B1", "AP4A.250105.002.A1", "AP4A.241205.013", "AP3A.241005.015"] },
+};
+
+const MODEL_LIST = [
+  "SC-02H",
+  "SC-02J",
+  "SC-03J",
+  "SM-G950F",
+  "SM-G955F",
+  "SM-G960F",
+  "SM-G965F",
+  "SC-01K",
+  "SM-N950F",
+  "SO-01H",
+  "SO-02H",
+  "SO-01J",
+  "SO-01K",
+  "SOV32",
+  "SOV34",
+  "SOV36",
+  "Pixel 6",
+  "Pixel 7",
+  "Pixel 8",
+  "G9FPL",
+  "GWKK3",
+  "GQML3",
+  "GX7AS",
+  "GB7N6",
+] as const;
+
+function getAndroidRelease(appVersion: string): string {
+  if (appVersion.startsWith("8.0.")) return "8.0.0";
+  if (appVersion.startsWith("8.1.")) return "8.1.0";
+  if (appVersion.startsWith("8.2.")) return "15.0.0";
+  return "14.0.0";
+}
+
+function pickRandom<T>(items: readonly T[]): T {
+  return items[Math.floor(Math.random() * items.length)];
+}
+
+function genDevice(): { appVersion: string; device: string; userAgent: string } {
+  const appVersion = pickRandom(APP_VERSIONS);
+  const release = getAndroidRelease(appVersion);
+  const versionInfo = VERSION_BUILDS[release];
+  const model = pickRandom(MODEL_LIST);
+  const build = pickRandom(versionInfo.builds);
+
   return {
-    device: `${d.sdk}.${d.model}`,
-    userAgent: `Dalvik/2.1.0 (Linux; U; Android ${d.sdk}; ${d.model} Build/${d.build})`,
+    appVersion,
+    device: `${versionInfo.sdk}.${model}`,
+    userAgent: `Dalvik/2.1.0 (Linux; U; Android ${versionInfo.android}; ${model} Build/${build})`,
   };
 }
 
@@ -137,11 +214,19 @@ const tokenCache = new Map<
 >();
 const CACHE_TTL = 1000 * 60 * 70; // 70 minutes (tokens last ~90 min)
 
+function isValidAreaId(areaId: string): boolean {
+  return /^JP([1-9]|[1-3]\d|4[0-7])$/.test(areaId);
+}
+
 export async function getRadikoAuth(
   targetAreaId?: string
 ): Promise<AuthResult> {
   // Default area if not specified
   const areaId = targetAreaId || "JP13";
+
+  if (!isValidAreaId(areaId)) {
+    throw new Error(`invalid areaId: ${areaId}`);
+  }
 
   // Check cache
   const cached = tokenCache.get(areaId);
@@ -150,8 +235,7 @@ export async function getRadikoAuth(
   }
 
   const userId = genUserId();
-  const { device, userAgent } = genDevice();
-  const appVersion = "8.2.4";
+  const { appVersion, device, userAgent } = genDevice();
   const appName = "aSmartPhone8";
 
   // Step 1: auth1

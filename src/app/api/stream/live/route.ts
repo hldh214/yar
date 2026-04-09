@@ -1,18 +1,31 @@
 // GET /api/stream/live?stationId=TBS
 // Returns the HLS playlist URL for live streaming
 // areaId is auto-resolved from stationId
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getRadikoAuth } from "@/lib/radiko-auth";
 import { getAreaIdForStation } from "@/lib/radiko-parser";
+import { findPlaylistCreateUrl } from "@/lib/radiko-stream";
+import { isValidStationId, normalizeStationId } from "@/lib/request-validation";
+import {
+  buildSignedProxyPath,
+  ensureStreamSessionId,
+  getStreamSessionCookieName,
+  getStreamSessionMaxAgeSeconds,
+} from "@/lib/stream-signing";
 
 export async function GET(request: NextRequest) {
   try {
-    const stationId = request.nextUrl.searchParams.get("stationId");
-    if (!stationId) {
+    const stationIdParam = request.nextUrl.searchParams.get("stationId");
+    if (!stationIdParam) {
       return Response.json(
         { error: "stationId is required" },
         { status: 400 }
       );
+    }
+
+    const stationId = normalizeStationId(stationIdParam);
+    if (!isValidStationId(stationId)) {
+      return Response.json({ error: "invalid stationId" }, { status: 400 });
     }
 
     const areaId = await getAreaIdForStation(stationId);
@@ -34,43 +47,33 @@ export async function GET(request: NextRequest) {
     }
 
     const xml = await streamRes.text();
-
-    // Find the live (timefree="0", areafree="0") playlist URL
-    const urlBlocks = xml.match(/<url[^>]*>[\s\S]*?<\/url>/gi);
-    if (!urlBlocks) {
-      throw new Error("no stream URLs found in XML");
-    }
-
-    const liveBlock = urlBlocks.find((block) => {
-      const tag = block.match(/<url[^>]*>/i)?.[0] || "";
-      return (
-        /timefree="0"/i.test(tag) && /areafree="0"/i.test(tag)
-      );
+    const baseUrl = findPlaylistCreateUrl(xml, {
+      timefree: false,
+      areafree: false,
     });
-    if (!liveBlock) {
-      throw new Error("no live stream URL found");
-    }
-
-    const playlistMatch = liveBlock.match(
-      /<playlist_create_url>([^<]+)<\/playlist_create_url>/i
-    );
-    if (!playlistMatch) {
-      throw new Error("no playlist_create_url found");
-    }
-
-    const baseUrl = playlistMatch[1].trim();
     const lsid = crypto.randomUUID().replace(/-/g, "");
 
     // Build the full playlist URL
     const playlistUrl = `${baseUrl}?station_id=${stationId}&l=15&lsid=${lsid}&type=b`;
 
-    return Response.json({
-      playlistUrl,
-      token: auth.token,
+    const sessionId = ensureStreamSessionId(
+      request.cookies.get(getStreamSessionCookieName())?.value
+    );
+
+    const response = NextResponse.json({
+      proxyUrl: await buildSignedProxyPath(sessionId, playlistUrl, auth.areaId),
       areaId: auth.areaId,
       stationId,
       type: "live",
     });
+    response.cookies.set(getStreamSessionCookieName(), sessionId, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: request.nextUrl.protocol === "https:",
+      path: "/",
+      maxAge: getStreamSessionMaxAgeSeconds(),
+    });
+    return response;
   } catch (e) {
     const message = e instanceof Error ? e.message : "stream fetch failed";
     return Response.json({ error: message }, { status: 500 });
