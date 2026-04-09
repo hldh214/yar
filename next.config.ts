@@ -11,11 +11,10 @@ function gitCommitHash(): string {
 }
 
 function appVersion(): string {
-  try {
-    return packageJson.version?.trim() || gitCommitHash();
-  } catch {
-    return gitCommitHash();
-  }
+  const hash = gitCommitHash();
+  const version = packageJson.version?.trim();
+
+  return version ? `${version}+${hash}` : hash;
 }
 
 const nextConfig: NextConfig = {
