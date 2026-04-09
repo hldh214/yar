@@ -109,7 +109,7 @@ export async function GET(request: NextRequest) {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
       },
-      next: { revalidate: 60 },
+      next: { revalidate: 30 },
     });
 
     if (!res.ok) {

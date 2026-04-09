@@ -127,7 +127,7 @@ function isRealImage(url: string): boolean {
 
 // --- Song list for a program's detail view ---
 // When `liveNoaItems` is provided (on-air program), those are shown directly
-// and kept up-to-date by the parent's 60s NOA polling.  For past programs the
+// and kept up-to-date by the parent's 10s NOA polling.  For past programs the
 // component does a one-time fetch using the ft/to time range.
 function SongList({ stationId, ft, to, compact, liveNoaItems }: {
   stationId: string; ft: string; to: string; compact?: boolean; liveNoaItems?: NoaItem[];
@@ -900,7 +900,7 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
 
 
   // Fetch NOA (now-on-air) for live display.
-  // Only poll when viewing today AND the selected program is on-air (60s interval).
+  // Only poll when viewing today AND the selected program is on-air (10s interval).
   const selectedIsOnAir = selectedProgram?.isOnAir ?? false;
   const shouldPollNoa = selectedDate === todayStr && selectedIsOnAir;
   useEffect(() => {
@@ -915,7 +915,7 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
         .catch(() => {});
     };
     fetchNoa();
-    const interval = setInterval(fetchNoa, 60000);
+    const interval = setInterval(fetchNoa, 10000);
     return () => { active = false; clearInterval(interval); };
   }, [stationId, shouldPollNoa]);
 
