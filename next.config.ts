@@ -1,21 +1,26 @@
 import type { NextConfig } from "next";
 import { execSync } from "child_process";
+import packageJson from "./package.json";
 
-function gitVersion(): string {
+function gitCommitHash(): string {
   try {
-    return execSync("git describe --tags --always 2>/dev/null").toString().trim();
+    return execSync("git rev-parse --short HEAD").toString().trim();
   } catch {
-    try {
-      return execSync("git rev-parse --short HEAD").toString().trim();
-    } catch {
-      return "dev";
-    }
+    return "dev";
+  }
+}
+
+function appVersion(): string {
+  try {
+    return packageJson.version?.trim() || gitCommitHash();
+  } catch {
+    return gitCommitHash();
   }
 }
 
 const nextConfig: NextConfig = {
   env: {
-    NEXT_PUBLIC_GIT_VERSION: gitVersion(),
+    NEXT_PUBLIC_GIT_VERSION: appVersion(),
   },
   async headers() {
     return [
