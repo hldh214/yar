@@ -85,6 +85,47 @@ export function usePlayerTime() {
 
 const SKIP_SECONDS = 10;
 
+// --- Retry / resilience helpers ---
+const MAX_FETCH_RETRIES = 3;
+const FETCH_RETRY_BASE_MS = 1000; // exponential backoff: 1s, 2s, 4s
+
+/** Fetch with exponential-backoff retry for network / 5xx errors. */
+async function fetchWithRetry(input: RequestInfo | URL, init?: RequestInit, retries = MAX_FETCH_RETRIES): Promise<Response> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const isLastAttempt = attempt === retries;
+    let res: Response;
+    try {
+      res = await fetch(input, init);
+    } catch (e) {
+      if (isLastAttempt) throw e;
+      await sleep(FETCH_RETRY_BASE_MS * 2 ** attempt);
+      continue;
+    }
+    // Retry on 5xx server errors (proxy / upstream hiccups)
+    if (res.status >= 500 && !isLastAttempt) {
+      res.body?.cancel().catch(() => {});
+      await sleep(FETCH_RETRY_BASE_MS * 2 ** attempt);
+      continue;
+    }
+    return res;
+  }
+  // Unreachable -- the loop always returns or throws on the last attempt
+  throw new Error('Network request failed');
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+// How many times to attempt full stream reconnect on fatal HLS errors.
+// With base=2s, cap=15s the schedule is roughly:
+//   2, 4, 8, 15, 15, 15, ... → reaches ~20 min of retries at ~100 attempts.
+// This covers scenarios like driving through a long tunnel with no signal.
+const MAX_HLS_RECONNECT = 100;
+// Delay between reconnection attempts (doubles each time, capped)
+const HLS_RECONNECT_BASE_MS = 2000;
+const HLS_RECONNECT_CAP_MS = 15_000;
+
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -112,6 +153,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   // Live elapsed: seconds since program ft (real-time clock)
   const [liveElapsed, setLiveElapsed] = useState(0);
   const liveElapsedRef = useRef(0);
+  // HLS reconnect tracking
+  const reconnectCountRef = useRef(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Stable refs for callbacks used in scheduleReconnect (avoids stale closures)
+  const loadHlsStreamRef = useRef<((url: string, info: PlaybackInfo, seekOffset?: number) => Promise<void>) | null>(null);
+  const fetchLiveProxyUrlRef = useRef<((info: PlaybackInfo) => Promise<string>) | null>(null);
+  const fetchTimefreeProxyUrlRef = useRef<((info: PlaybackInfo, seekTime?: number) => Promise<string>) | null>(null);
+  // Stable ref for scheduleReconnect so useEffect audio handlers don't need it as a dep
+  const scheduleReconnectRef = useRef<() => void>(() => {});
 
   // Keep refs in sync with state
   useEffect(() => { currentInfoRef.current = currentInfo; }, [currentInfo]);
@@ -178,9 +228,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
               ? [{ src: updated.stationLogo, sizes: '256x256', type: 'image/png' }]
               : [],
           });
+          // Keep position state cleared for live
+          try { navigator.mediaSession.setPositionState(); } catch { /* noop */ }
         }
       } catch {
-        // Silently fail — will retry next cycle
+        // Silent fail — will retry next cycle
       }
     };
 
@@ -235,6 +287,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     };
     const onError = () => {
       if (pausedAtRef.current >= 0) return;
+      // When HLS.js is active, it handles errors via its own ERROR event;
+      // ignore the audio element's error to avoid duplicate/conflicting handling.
+      if (hlsRef.current) return;
+      // For native HLS (Safari fallback), trigger reconnection instead of giving up
+      if (audio.src) {
+        scheduleReconnectRef.current();
+        return;
+      }
       setError('Playback error');
     };
     const onWaiting = () => {
@@ -246,6 +306,26 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(false);
     };
 
+    // Stall detection: if the audio is stalled for too long, trigger reconnection.
+    // Uses a timer so brief stalls (normal for HLS) are ignored.
+    let stallTimer: ReturnType<typeof setTimeout> | null = null;
+    const STALL_TIMEOUT_MS = 15_000; // 15s without progress -> reconnect
+    const clearStallTimer = () => {
+      if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; }
+    };
+    const onStalled = () => {
+      if (pausedAtRef.current >= 0) return;
+      clearStallTimer();
+      stallTimer = setTimeout(() => {
+        // Only reconnect if still stalled (not paused, still supposedly playing)
+        if (pausedAtRef.current >= 0) return;
+        scheduleReconnectRef.current();
+      }, STALL_TIMEOUT_MS);
+    };
+    // Any progress (data received) or playing clears the stall timer
+    const onProgress = () => clearStallTimer();
+    const onPlaying = () => clearStallTimer();
+
     audio.addEventListener('timeupdate', onTimeUpdate);
     audio.addEventListener('durationchange', onDurationChange);
     audio.addEventListener('play', onPlay);
@@ -253,8 +333,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     audio.addEventListener('error', onError);
     audio.addEventListener('waiting', onWaiting);
     audio.addEventListener('canplay', onCanPlay);
+    audio.addEventListener('stalled', onStalled);
+    audio.addEventListener('progress', onProgress);
+    audio.addEventListener('playing', onPlaying);
 
     return () => {
+      clearStallTimer();
       audio.removeEventListener('timeupdate', onTimeUpdate);
       audio.removeEventListener('durationchange', onDurationChange);
       audio.removeEventListener('play', onPlay);
@@ -262,6 +346,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       audio.removeEventListener('error', onError);
       audio.removeEventListener('waiting', onWaiting);
       audio.removeEventListener('canplay', onCanPlay);
+      audio.removeEventListener('stalled', onStalled);
+      audio.removeEventListener('progress', onProgress);
+      audio.removeEventListener('playing', onPlaying);
     };
   }, [volume]);
 
@@ -282,6 +369,29 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           ? [{ src: info.stationLogo, sizes: '256x256', type: 'image/png' }]
           : [],
       });
+
+      // For live streams: clear position state so OS shows a live indicator
+      // (no seekable progress bar) instead of a finite duration bar.
+      // For timefree: set the real duration so the progress bar is correct.
+      if (info.type === 'live') {
+        // Clearing position state tells the media session there is no
+        // finite timeline -- Android/Chrome will not show a progress bar.
+        try {
+          navigator.mediaSession.setPositionState();
+        } catch {
+          // setPositionState() without args may not be supported everywhere
+        }
+      } else if (info.type === 'timefree' && info.duration && info.duration > 0) {
+        try {
+          navigator.mediaSession.setPositionState({
+            duration: info.duration,
+            playbackRate: 1,
+            position: Math.min(seekOffsetRef.current, info.duration),
+          });
+        } catch {
+          // Ignore if not supported
+        }
+      }
     }
   }, []);
 
@@ -320,6 +430,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         hls.attachMedia(audio);
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          // Reset reconnect counter on successful manifest load
+          reconnectCountRef.current = 0;
           audio.play().catch(() => {
             setError('Autoplay blocked. Click play to start.');
             setIsLoading(false);
@@ -327,10 +439,27 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         });
 
         hls.on(Hls.Events.ERROR, (_event, data) => {
-          if (data.fatal) {
-            setError(`HLS error: ${data.details}`);
-            setIsLoading(false);
+          if (!data.fatal) return;
+
+          // Try built-in HLS.js recovery first
+          if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            hls.recoverMediaError();
+            return;
           }
+
+          // For network errors, attempt full stream reconnect
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            scheduleReconnectRef.current();
+            return;
+          }
+
+          // Other fatal errors -- still try reconnection rather than giving up
+          scheduleReconnectRef.current();
+        });
+
+        // Also listen for successful fragment loading to reset reconnect counter
+        hls.on(Hls.Events.FRAG_LOADED, () => {
+          reconnectCountRef.current = 0;
         });
       } else if (audio.canPlayType('application/vnd.apple.mpegurl')) {
         audio.src = proxyPlaylistUrl;
@@ -347,8 +476,83 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     },
     [destroyHls, updateMediaSession]
   );
+  useEffect(() => { loadHlsStreamRef.current = loadHlsStream; }, [loadHlsStream]);
 
-  // Helper: fetch timefree proxy URL with optional seek
+  // Schedule a full stream reconnection with exponential backoff.
+  // Uses empty deps and reads all state through refs to avoid stale closures.
+  // Other callbacks reference this via scheduleReconnectRef.
+  const scheduleReconnect = useCallback(() => {
+    // Clear any pending reconnection timer
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+
+    const attempt = reconnectCountRef.current;
+    if (attempt >= MAX_HLS_RECONNECT) {
+      setError('Stream connection lost. Tap play to retry.');
+      setIsLoading(false);
+      setIsPlaying(false);
+      reconnectCountRef.current = 0;
+      return;
+    }
+
+    reconnectCountRef.current = attempt + 1;
+    const delayMs = Math.min(HLS_RECONNECT_BASE_MS * 2 ** attempt, HLS_RECONNECT_CAP_MS);
+    setIsLoading(true);
+    setError(null);
+
+    reconnectTimerRef.current = setTimeout(async () => {
+      reconnectTimerRef.current = null;
+      const info = currentInfoRef.current;
+      if (!info) return;
+      // Read latest callbacks from refs to avoid stale closures
+      const doLoadHls = loadHlsStreamRef.current;
+      const doFetchLive = fetchLiveProxyUrlRef.current;
+      const doFetchTimefree = fetchTimefreeProxyUrlRef.current;
+      if (!doLoadHls || !doFetchLive || !doFetchTimefree) return;
+
+      try {
+        if (info.type === 'live' && !isBehindLiveRef.current) {
+          // Re-request live stream
+          const proxyUrl = await doFetchLive(info);
+          await doLoadHls(proxyUrl, info);
+        } else if (info.type === 'live' && isBehindLiveRef.current && info.ft) {
+          // Behind live: resume via timefree seek-back
+          const pos = currentTimeRef.current;
+          const toDate = new Date(Date.now());
+          const toStr = formatDateToRadiko(toDate);
+          const ftDate = parseRadikoDate(info.ft);
+          const seekDate = new Date(ftDate.getTime() + pos * 1000);
+          const seekStr = formatDateToRadiko(seekDate);
+          const params = new URLSearchParams({
+            stationId: info.stationId,
+            ft: info.ft,
+            to: toStr,
+            seek: seekStr,
+          });
+          const res = await fetchWithRetry(`/api/stream/timefree?${params}`);
+          const data = await res.json();
+          if (data.error) {
+            scheduleReconnectRef.current();
+            return;
+          }
+          await doLoadHls(data.proxyUrl, info, pos);
+          setIsBehindLive(true);
+        } else if (info.type === 'timefree') {
+          // Resume timefree from current position
+          const pos = currentTimeRef.current;
+          const proxyUrl = await doFetchTimefree(info, pos);
+          await doLoadHls(proxyUrl, info, pos);
+        }
+      } catch {
+        // Fetch itself failed -- schedule another reconnection
+        scheduleReconnectRef.current();
+      }
+    }, delayMs);
+  }, []);
+  useEffect(() => { scheduleReconnectRef.current = scheduleReconnect; }, [scheduleReconnect]);
+  // Helper: fetch timefree proxy URL with optional seek (with retry)
   const fetchTimefreeProxyUrl = useCallback(
     async (info: PlaybackInfo, seekTime?: number): Promise<string> => {
       const params = new URLSearchParams({
@@ -361,25 +565,26 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const seekDate = new Date(ftDate.getTime() + seekTime * 1000);
         params.set('seek', formatDateToRadiko(seekDate));
       }
-      const res = await fetch(`/api/stream/timefree?${params}`);
+      const res = await fetchWithRetry(`/api/stream/timefree?${params}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       return data.proxyUrl;
     },
     []
   );
+  useEffect(() => { fetchTimefreeProxyUrlRef.current = fetchTimefreeProxyUrl; }, [fetchTimefreeProxyUrl]);
 
-  // Helper: fetch live proxy URL
   const fetchLiveProxyUrl = useCallback(
     async (info: PlaybackInfo): Promise<string> => {
       const params = new URLSearchParams({ stationId: info.stationId });
-      const res = await fetch(`/api/stream/live?${params}`);
+      const res = await fetchWithRetry(`/api/stream/live?${params}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       return data.proxyUrl;
     },
     []
   );
+  useEffect(() => { fetchLiveProxyUrlRef.current = fetchLiveProxyUrl; }, [fetchLiveProxyUrl]);
 
   const playLive = useCallback(
     async (info: PlaybackInfo) => {
@@ -421,6 +626,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const pause = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
+    // Cancel any pending reconnection
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    reconnectCountRef.current = 0;
     pausedAtRef.current = currentTimeRef.current;
     audio.pause();
     destroyHls();
@@ -428,12 +639,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     // because hls.destroy() can interfere with event ordering
     setIsPlaying(false);
     setIsLoading(false);
+    setError(null);
   }, [destroyHls]);
 
   // Resume: re-request the stream from the paused position
   const resume = useCallback(() => {
     const info = currentInfoRef.current;
     if (!info) return;
+    // Cancel any pending reconnection
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    reconnectCountRef.current = 0;
     const pausedAt = pausedAtRef.current;
     if (pausedAt < 0) {
       // Not paused via our pause(), just try audio.play()
@@ -460,10 +678,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             to: toStr,
             seek: seekStr,
           });
-          const res = await fetch(`/api/stream/timefree?${params}`);
+          const res = await fetchWithRetry(`/api/stream/timefree?${params}`);
           if (seekIdRef.current !== thisSeekId) return;
           const data = await res.json();
-          if (data.error) throw new Error(data.error);
+          if (data.error) {
+            setError(data.error);
+            setIsLoading(false);
+            return;
+          }
           const proxyUrl = data.proxyUrl;
           if (seekIdRef.current !== thisSeekId) return;
           await loadHlsStream(proxyUrl, info, pausedAt);
@@ -520,11 +742,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
               to: info.to!,
               seek: seekStr,
             });
-            const res = await fetch(`/api/stream/timefree?${params}`);
+            const res = await fetchWithRetry(`/api/stream/timefree?${params}`);
             if (seekIdRef.current !== thisSeekId) return;
 
             const data = await res.json();
-            if (data.error) throw new Error(data.error);
+            if (data.error) {
+              if (seekIdRef.current !== thisSeekId) return;
+              setError(data.error);
+              setIsLoading(false);
+              return;
+            }
 
             const proxyUrl = data.proxyUrl;
             if (seekIdRef.current !== thisSeekId) return;
@@ -598,11 +825,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             to: toStr,
             seek: seekStr,
           });
-          const res = await fetch(`/api/stream/timefree?${params}`);
+          const res = await fetchWithRetry(`/api/stream/timefree?${params}`);
           if (seekIdRef.current !== thisSeekId) return;
 
           const data = await res.json();
-          if (data.error) throw new Error(data.error);
+          if (data.error) {
+            if (seekIdRef.current !== thisSeekId) return;
+            setError(data.error);
+            setIsLoading(false);
+            return;
+          }
 
           const proxyUrl = data.proxyUrl;
           if (seekIdRef.current !== thisSeekId) return;
@@ -682,6 +914,36 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     };
   }, [resume, pause, skipForward, skipBackward]);
 
+  // Keep Media Session position state in sync for timefree playback.
+  // For live, we clear it so Android shows a live indicator (no progress bar).
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    if (!currentInfo) return;
+
+    if (currentInfo.type === 'live') {
+      // Clear position state for live -- tell the OS this is a live stream
+      try { navigator.mediaSession.setPositionState(); } catch { /* noop */ }
+      return;
+    }
+
+    // Timefree: update position state periodically
+    if (currentInfo.type === 'timefree' && duration > 0) {
+      const updatePosition = () => {
+        const pos = Math.max(0, Math.min(currentTimeRef.current, duration));
+        try {
+          navigator.mediaSession.setPositionState({
+            duration,
+            playbackRate: 1,
+            position: pos,
+          });
+        } catch { /* noop */ }
+      };
+      updatePosition();
+      const id = setInterval(updatePosition, 5000);
+      return () => clearInterval(id);
+    }
+  }, [currentInfo, duration]);
+
   // Memoize the low-frequency context value so consumers only re-render
   // when one of these values actually changes (not on every time tick).
   const playerValue = useMemo<PlayerContextType>(() => ({
@@ -709,7 +971,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   ]);
 
   // High-frequency time context — updates ~4x/sec, only consumed by
-  // components that actually need the playback position (e.g. progress bar).
+  // components that actually need the playback position (e.g., progress bar).
   const timeValue = useMemo<PlayerTimeContextType>(
     () => ({ currentTime, liveElapsed }),
     [currentTime, liveElapsed]
