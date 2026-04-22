@@ -150,9 +150,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   // Live seek-back state: true when playing timefree behind the live edge
   const [isBehindLive, setIsBehindLive] = useState(false);
   const isBehindLiveRef = useRef(false);
-  // Live elapsed: seconds since program ft (real-time clock)
+  // Live elapsed: seconds since program ft (derived from stream EXT-X-PROGRAM-DATE-TIME)
   const [liveElapsed, setLiveElapsed] = useState(0);
   const liveElapsedRef = useRef(0);
+  // Offset (ms) = Date.now() - streamTime. Derived from EXT-X-PROGRAM-DATE-TIME.
+  // When available, the live clock uses (Date.now() - clockDriftMs) instead of
+  // raw Date.now(), so the displayed time reflects the actual broadcast position
+  // rather than the client clock (which runs ~30-40s ahead due to HLS buffering).
+  const clockDriftMsRef = useRef<number | null>(null);
   // HLS reconnect tracking
   const reconnectCountRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -168,19 +173,28 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { isBehindLiveRef.current = isBehindLive; }, [isBehindLive]);
   useEffect(() => { liveElapsedRef.current = liveElapsed; }, [liveElapsed]);
 
-  // Tick liveElapsed every second for live mode
+  // Tick liveElapsed every second for live mode.
+  // Uses EXT-X-PROGRAM-DATE-TIME from the HLS stream (via clockDriftMsRef) to
+  // anchor the displayed time to the actual broadcast position. Does NOT tick
+  // until the first FRAG_CHANGED provides the drift value, avoiding a brief
+  // flash of client-clock time before the stream metadata arrives.
+  // Stops ticking when paused or behind live.
   useEffect(() => {
     if (!currentInfo || currentInfo.type !== 'live' || !currentInfo.ft) return;
     if (isBehindLive) return; // Don't tick when behind live
+    if (!isPlaying) return; // Don't tick when paused
     const ftDate = parseRadikoDate(currentInfo.ft);
     const tick = () => {
-      const elapsed = (Date.now() - ftDate.getTime()) / 1000;
+      const drift = clockDriftMsRef.current;
+      if (drift === null) return; // Wait for first FRAG_CHANGED
+      const nowMs = Date.now() - drift;
+      const elapsed = (nowMs - ftDate.getTime()) / 1000;
       setLiveElapsed(Math.max(0, elapsed));
     };
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [currentInfo, isBehindLive]);
+  }, [currentInfo, isBehindLive, isPlaying]);
 
   // Auto-update currentInfo when live program transitions to next program
   useEffect(() => {
@@ -209,9 +223,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           to: onAir.endTime,
         };
         setCurrentInfo(updated);
-        // Reset liveElapsed for the new program
+        // Reset liveElapsed for the new program (use stream time if available)
         const newFtDate = parseRadikoDate(onAir.startTime);
-        const newElapsed = (Date.now() - newFtDate.getTime()) / 1000;
+        const drift = clockDriftMsRef.current;
+        const reference = drift !== null ? (Date.now() - drift) : Date.now();
+        const newElapsed = (reference - newFtDate.getTime()) / 1000;
         setLiveElapsed(Math.max(0, newElapsed));
         // Reset seekOffset and currentTime for the new program baseline
         seekOffsetRef.current = 0;
@@ -409,6 +425,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       currentTimeRef.current = seekOffset;
       setCurrentTime(seekOffset);
       pausedAtRef.current = -1;
+      clockDriftMsRef.current = null;
 
       if (info.type === 'timefree' && info.duration && info.duration > 0) {
         knownDurationRef.current = info.duration;
@@ -460,6 +477,21 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         // Also listen for successful fragment loading to reset reconnect counter
         hls.on(Hls.Events.FRAG_LOADED, () => {
           reconnectCountRef.current = 0;
+        });
+
+        // Capture EXT-X-PROGRAM-DATE-TIME from HLS fragments.
+        // Each fragment carries a programDateTime (ms since epoch) parsed from
+        // the #EXT-X-PROGRAM-DATE-TIME tag. We compute the drift between the
+        // client wall clock and the stream's broadcast time so the live elapsed
+        // timer can tick smoothly every second while staying anchored to the
+        // actual broadcast position (which lags ~30-40s behind real time).
+        hls.on(Hls.Events.FRAG_CHANGED, (_event, data) => {
+          const frag = data.frag;
+          if (frag?.programDateTime) {
+            // programDateTime = start of fragment; add duration for "current" pos
+            const streamNowMs = frag.programDateTime + (frag.duration ?? 0) * 1000;
+            clockDriftMsRef.current = Date.now() - streamNowMs;
+          }
         });
       } else if (audio.canPlayType('application/vnd.apple.mpegurl')) {
         audio.src = proxyPlaylistUrl;
@@ -781,7 +813,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       const info = currentInfoRef.current;
       if (!info || !info.ft) return;
       const ftDate = parseRadikoDate(info.ft);
-      const nowElapsed = (Date.now() - ftDate.getTime()) / 1000;
+      // Use stream time for "how far along we are" to match the displayed time
+      const drift = clockDriftMsRef.current;
+      const refMs = drift !== null ? (Date.now() - drift) : Date.now();
+      const nowElapsed = (refMs - ftDate.getTime()) / 1000;
       const clampedTime = Math.max(0, Math.min(time, nowElapsed));
 
       // If seeking close to the live edge (within 5s), go back to live
