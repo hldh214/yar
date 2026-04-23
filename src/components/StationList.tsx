@@ -101,6 +101,7 @@ export default function StationList() {
       let performer = station.name;
       let ft: string | undefined;
       let to: string | undefined;
+      let artworkUrl = station.logoUrl;
       try {
         const res = await fetch(`/api/programs?stationId=${station.id}`);
         const data = await res.json();
@@ -109,6 +110,7 @@ export default function StationList() {
           if (onAir) {
             title = onAir.title || title;
             performer = onAir.performer || performer;
+            artworkUrl = onAir.imageUrl || artworkUrl;
             ft = onAir.startTime;
             to = onAir.endTime;
           }
@@ -120,6 +122,7 @@ export default function StationList() {
         stationId: station.id,
         stationName: station.name,
         stationLogo: station.logoUrl,
+        artworkUrl,
         type: 'live',
         title,
         performer,

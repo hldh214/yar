@@ -31,6 +31,7 @@ export interface PlaybackInfo {
   stationId: string;
   stationName: string;
   stationLogo: string;
+  artworkUrl?: string;
   type: 'live' | 'timefree';
   title: string;
   performer: string;
@@ -224,6 +225,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           ...info,
           title: onAir.title || info.stationName,
           performer: onAir.performer || info.stationName,
+          artworkUrl: onAir.imageUrl || info.stationLogo,
           ft: onAir.startTime,
           to: onAir.endTime,
         };
@@ -245,8 +247,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             title: updated.title,
             artist: updated.performer,
             album: updated.stationName,
-            artwork: updated.stationLogo
-              ? [{ src: updated.stationLogo, sizes: '256x256', type: 'image/png' }]
+            artwork: (updated.artworkUrl || updated.stationLogo)
+              ? [{ src: updated.artworkUrl || updated.stationLogo, sizes: '256x256', type: 'image/png' }]
               : [],
           });
           // Keep position state cleared for live
@@ -394,8 +396,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         title: info.title || `${info.stationName} Live`,
         artist: info.performer || info.stationName,
         album: info.stationName,
-        artwork: info.stationLogo
-          ? [{ src: info.stationLogo, sizes: '256x256', type: 'image/png' }]
+        artwork: (info.artworkUrl || info.stationLogo)
+          ? [{ src: info.artworkUrl || info.stationLogo, sizes: '256x256', type: 'image/png' }]
           : [],
       });
 
