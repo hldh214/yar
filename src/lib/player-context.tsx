@@ -153,6 +153,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   // Live elapsed: seconds since program ft (derived from stream EXT-X-PROGRAM-DATE-TIME)
   const [liveElapsed, setLiveElapsed] = useState(0);
   const liveElapsedRef = useRef(0);
+  const usesNativeHlsRef = useRef(false);
+  const liveClockFallbackAtMsRef = useRef(0);
   // Offset (ms) = Date.now() - streamTime. Derived from EXT-X-PROGRAM-DATE-TIME.
   // When available, the live clock uses (Date.now() - clockDriftMs) instead of
   // raw Date.now(), so the displayed time reflects the actual broadcast position
@@ -196,7 +198,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     return () => clearInterval(id);
   }, [currentInfo, isBehindLive, isPlaying]);
 
-  // Auto-update currentInfo when live program transitions to next program
+  // Auto-update currentInfo when live program transitions to next program.
+  // Uses the stream-derived clock (Date.now() - clockDriftMs) so the switch
+  // happens when the listener actually *hears* the new program, not when the
+  // wall clock passes the boundary (which is ~30-40s earlier due to HLS delay).
   useEffect(() => {
     if (!currentInfo || currentInfo.type !== 'live') return;
     if (isBehindLive) return;
@@ -253,12 +258,20 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     };
 
     if (currentInfo.to) {
-      // Schedule precisely at program end + 1s buffer
+      // Poll every 2s and check whether the *stream* time has passed the
+      // program boundary, rather than scheduling off the wall clock.
       const toDate = parseRadikoDate(currentInfo.to);
-      const msUntilEnd = toDate.getTime() - Date.now();
-      const delay = msUntilEnd > 0 ? msUntilEnd + 1000 : 0;
-      const timer = setTimeout(fetchAndUpdate, delay);
-      return () => clearTimeout(timer);
+      const id = setInterval(() => {
+        const drift = clockDriftMsRef.current;
+        const shouldUseWallClock = usesNativeHlsRef.current
+          || (drift === null && Date.now() >= liveClockFallbackAtMsRef.current);
+        if (drift === null && !shouldUseWallClock) return;
+        const streamNowMs = drift !== null ? (Date.now() - drift) : Date.now();
+        if (streamNowMs >= toDate.getTime()) {
+          fetchAndUpdate();
+        }
+      }, 2000);
+      return () => clearInterval(id);
     } else {
       // No `to` available — poll every 60s
       const id = setInterval(fetchAndUpdate, 60000);
@@ -425,7 +438,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       currentTimeRef.current = seekOffset;
       setCurrentTime(seekOffset);
       pausedAtRef.current = -1;
+      usesNativeHlsRef.current = false;
       clockDriftMsRef.current = null;
+      liveClockFallbackAtMsRef.current = Date.now() + 15_000;
 
       if (info.type === 'timefree' && info.duration && info.duration > 0) {
         knownDurationRef.current = info.duration;
@@ -436,6 +451,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (Hls.isSupported()) {
+        usesNativeHlsRef.current = false;
         const hls = new Hls({
           enableWorker: true,
           lowLatencyMode: false,
@@ -494,6 +510,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           }
         });
       } else if (audio.canPlayType('application/vnd.apple.mpegurl')) {
+        usesNativeHlsRef.current = true;
         audio.src = proxyPlaylistUrl;
         audio.play().catch(() => {
           setError('Autoplay blocked. Click play to start.');
