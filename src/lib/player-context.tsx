@@ -85,6 +85,21 @@ export function usePlayerTime() {
 }
 
 const SKIP_SECONDS = 10;
+const MEDIA_ARTWORK_SIZES = [96, 128, 192, 256, 384, 512] as const;
+
+function buildMediaSessionArtwork(artworkUrl: string | undefined, stationLogo: string) {
+  const source = artworkUrl || stationLogo;
+  if (!source) return [];
+
+  const encodedSource = encodeURIComponent(source);
+  const adapted = MEDIA_ARTWORK_SIZES.map((size) => ({
+    src: `/api/media-artwork?url=${encodedSource}&size=${size}`,
+    sizes: `${size}x${size}`,
+    type: 'image/png',
+  }));
+
+  return [...adapted, { src: source }];
+}
 
 // --- Retry / resilience helpers ---
 const MAX_FETCH_RETRIES = 3;
@@ -247,9 +262,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             title: updated.title,
             artist: updated.performer,
             album: updated.stationName,
-            artwork: (updated.artworkUrl || updated.stationLogo)
-              ? [{ src: updated.artworkUrl || updated.stationLogo, sizes: '256x256', type: 'image/png' }]
-              : [],
+            artwork: buildMediaSessionArtwork(updated.artworkUrl, updated.stationLogo),
           });
           // Keep position state cleared for live
           try { navigator.mediaSession.setPositionState(); } catch { /* noop */ }
@@ -396,9 +409,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         title: info.title || `${info.stationName} Live`,
         artist: info.performer || info.stationName,
         album: info.stationName,
-        artwork: (info.artworkUrl || info.stationLogo)
-          ? [{ src: info.artworkUrl || info.stationLogo, sizes: '256x256', type: 'image/png' }]
-          : [],
+        artwork: buildMediaSessionArtwork(info.artworkUrl, info.stationLogo),
       });
 
       // For live streams: clear position state so OS shows a live indicator
