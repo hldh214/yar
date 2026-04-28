@@ -198,16 +198,16 @@ function ProgressBar({
   const tooltipTime = tooltipRatio * totalDuration;
 
   return (
-    <div className="flex items-center gap-1.5 sm:gap-3 w-full">
+    <div className="flex items-center gap-2 sm:gap-3 w-full">
       {/* Elapsed time */}
-      <span className="text-[11px] font-mono text-gray-400 w-14 text-right flex-shrink-0 select-none tabular-nums">
+      <span className="text-xs sm:text-[11px] font-mono text-gray-400 w-12 sm:w-14 text-right flex-shrink-0 select-none tabular-nums">
         {ft ? absoluteTime(ft, displayTime) : formatSeconds(displayTime)}
       </span>
 
       {/* Track container: tall hit area, thin visible track */}
       <div
         ref={trackRef}
-        className="relative flex-1 h-5 flex items-center cursor-pointer touch-none group"
+        className="relative flex-1 h-9 sm:h-5 flex items-center cursor-pointer touch-none group"
         onMouseDown={handleMouseDown}
         onTouchStart={handleTouchStart}
         onMouseMove={handleMouseMove}
@@ -216,7 +216,7 @@ function ProgressBar({
       >
         {/* Track background */}
         <div className={`w-full rounded-full bg-gray-600/80 transition-[height] duration-150 ${
-          interacting || dragging ? 'h-1.5' : 'h-1'
+          interacting || dragging ? 'h-2.5 sm:h-1.5' : 'h-2 sm:h-1'
         }`}>
           {/* Fill */}
           <div
@@ -229,8 +229,8 @@ function ProgressBar({
         <div
           className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 rounded-full transition-[width,height,opacity] duration-150 shadow-sm ${
             interacting || dragging
-              ? 'w-3.5 h-3.5 opacity-100'
-              : 'w-2.5 h-2.5 opacity-80'
+              ? 'w-5 h-5 sm:w-3.5 sm:h-3.5 opacity-100'
+              : 'w-4 h-4 sm:w-2.5 sm:h-2.5 opacity-90 sm:opacity-80'
           }`}
           style={{ left: `${displayRatio * 100}%`, backgroundColor: accentColor }}
         />
@@ -250,9 +250,9 @@ function ProgressBar({
 
       {/* Total / end time */}
       {hideEndTime ? (
-        <span className="w-14 flex-shrink-0" />
+        <span className="w-12 sm:w-14 flex-shrink-0" />
       ) : (
-        <span className="text-[11px] font-mono text-gray-400 w-14 text-left flex-shrink-0 select-none tabular-nums">
+        <span className="text-xs sm:text-[11px] font-mono text-gray-400 w-12 sm:w-14 text-left flex-shrink-0 select-none tabular-nums">
           {ft ? absoluteTime(ft, totalDuration) : formatSeconds(totalDuration)}
         </span>
       )}
@@ -434,10 +434,10 @@ export default function PlayerBar() {
         <div className="h-0.5 bg-red-500 animate-pulse" />
       )}
 
-      <div className="max-w-screen-xl mx-auto px-3 sm:px-4">
+      <div className="max-w-screen-xl mx-auto px-4 sm:px-4">
         {/* Progress bar row */}
         {showBar && (
-          <div className="pt-2">
+          <div className="pt-2.5 sm:pt-2">
             <ProgressBar
               currentTime={barCurrentTime}
               totalDuration={barDuration}
@@ -450,51 +450,53 @@ export default function PlayerBar() {
         )}
 
         {/* Controls row */}
-        <div className="flex items-center gap-2 sm:gap-3 py-2 sm:py-2.5">
-          {/* Station logo */}
-          {currentInfo?.stationLogo && (
-            <img
-              src={currentInfo.stationLogo}
-              alt={currentInfo.stationName}
-              className="w-8 h-8 sm:w-10 sm:h-10 rounded object-contain bg-white flex-shrink-0"
-            />
-          )}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-3 py-3 sm:py-2.5">
+          <div className="flex items-center gap-3 min-w-0 sm:flex-1">
+            {/* Station logo */}
+            {currentInfo?.stationLogo && (
+              <img
+                src={currentInfo.stationLogo}
+                alt={currentInfo.stationName}
+                className="w-11 h-11 sm:w-10 sm:h-10 rounded-lg sm:rounded object-contain bg-white flex-shrink-0"
+              />
+            )}
 
-          {/* Info */}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              {isLive && !isBehindLive && (
-                <span className="text-[10px] font-bold bg-red-600 text-white px-1.5 py-0.5 rounded flex-shrink-0">
-                  LIVE
+            {/* Info */}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                {isLive && !isBehindLive && (
+                  <span className="text-[10px] font-bold bg-red-600 text-white px-1.5 py-0.5 rounded flex-shrink-0">
+                    LIVE
+                  </span>
+                )}
+                {isLive && isBehindLive && (
+                  <span className="text-[10px] font-bold bg-orange-500 text-white px-1.5 py-0.5 rounded flex-shrink-0">
+                    BEHIND
+                  </span>
+                )}
+                {isTimefree && (
+                  <span className="text-[10px] font-bold bg-blue-600 text-white px-1.5 py-0.5 rounded flex-shrink-0">
+                    TF
+                  </span>
+                )}
+                <span className="text-sm sm:text-sm font-medium truncate">
+                  {currentInfo?.title || currentInfo?.stationName || 'Unknown'}
                 </span>
-              )}
-              {isLive && isBehindLive && (
-                <span className="text-[10px] font-bold bg-orange-500 text-white px-1.5 py-0.5 rounded flex-shrink-0">
-                  BEHIND
-                </span>
-              )}
-              {isTimefree && (
-                <span className="text-[10px] font-bold bg-blue-600 text-white px-1.5 py-0.5 rounded flex-shrink-0">
-                  TF
-                </span>
-              )}
-              <span className="text-sm font-medium truncate">
-                {currentInfo?.title || currentInfo?.stationName || 'Unknown'}
-              </span>
+              </div>
+              <p className="text-xs text-gray-400 truncate">
+                {currentInfo?.performer || currentInfo?.stationName}
+              </p>
+              {error && <p className="text-xs text-red-400 mt-0.5 line-clamp-2 sm:line-clamp-none">{error}</p>}
             </div>
-            <p className="text-xs text-gray-400 truncate">
-              {currentInfo?.performer || currentInfo?.stationName}
-            </p>
-            {error && <p className="text-xs text-red-400 mt-0.5">{error}</p>}
           </div>
 
           {/* Controls */}
-          <div className="flex items-center gap-0.5 sm:gap-1.5 flex-shrink-0">
+          <div className="flex items-center justify-center gap-2 sm:gap-1.5 w-full sm:w-auto flex-shrink-0">
             {/* Back to Live */}
             {isLive && isBehindLive && (
               <button
                 onClick={backToLive}
-                className="flex items-center gap-1 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-full text-[11px] sm:text-xs font-medium bg-red-600 text-white hover:bg-red-500 active:bg-red-700 transition-colors"
+                className="min-h-11 sm:min-h-0 flex items-center gap-1 px-3 sm:px-2.5 py-2 sm:py-1.5 rounded-full text-xs sm:text-xs font-medium bg-red-600 text-white hover:bg-red-500 active:bg-red-700 transition-colors"
                 aria-label="Back to live"
               >
                 <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
@@ -506,10 +508,10 @@ export default function PlayerBar() {
             {(isTimefree || hasLiveBar) && (
               <button
                 onClick={skipBackward}
-                className="w-7 h-7 sm:w-9 sm:h-9 flex items-center justify-center rounded-full text-gray-300 hover:text-white hover:bg-gray-700 active:bg-gray-600 transition-colors"
+                className="w-12 h-12 sm:w-9 sm:h-9 flex items-center justify-center rounded-full text-gray-300 bg-gray-800/80 sm:bg-transparent hover:text-white hover:bg-gray-700 active:bg-gray-600 transition-colors"
                 aria-label="Back 10 seconds"
               >
-                <SkipBackIcon className="w-5 h-5 sm:w-6 sm:h-6" />
+                <SkipBackIcon className="w-7 h-7 sm:w-6 sm:h-6" />
               </button>
             )}
 
@@ -517,20 +519,20 @@ export default function PlayerBar() {
             <button
               onClick={isPlaying ? pause : resume}
               disabled={isLoading && !isPlaying}
-              className="w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center rounded-full bg-white text-gray-900 hover:bg-gray-200 active:bg-gray-300 disabled:opacity-50 transition-colors"
+              className="w-14 h-14 sm:w-11 sm:h-11 flex items-center justify-center rounded-full bg-white text-gray-900 hover:bg-gray-200 active:bg-gray-300 disabled:opacity-50 transition-colors shadow-sm"
               aria-label={isPlaying ? 'Pause' : 'Play'}
             >
               {isLoading ? (
-                <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
+                <svg className="w-6 h-6 sm:w-5 sm:h-5 animate-spin" viewBox="0 0 24 24" fill="none">
                   <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="31.4 31.4" />
                 </svg>
               ) : isPlaying ? (
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                <svg className="w-6 h-6 sm:w-5 sm:h-5" viewBox="0 0 24 24" fill="currentColor">
                   <rect x="6" y="4" width="4" height="16" rx="1" />
                   <rect x="14" y="4" width="4" height="16" rx="1" />
                 </svg>
               ) : (
-                <svg className="w-5 h-5 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
+                <svg className="w-6 h-6 sm:w-5 sm:h-5 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M8 5v14l11-7z" />
                 </svg>
               )}
@@ -540,10 +542,10 @@ export default function PlayerBar() {
             {(isTimefree || (hasLiveBar && isBehindLive)) && (
               <button
                 onClick={skipForward}
-                className="w-7 h-7 sm:w-9 sm:h-9 flex items-center justify-center rounded-full text-gray-300 hover:text-white hover:bg-gray-700 active:bg-gray-600 transition-colors"
+                className="w-12 h-12 sm:w-9 sm:h-9 flex items-center justify-center rounded-full text-gray-300 bg-gray-800/80 sm:bg-transparent hover:text-white hover:bg-gray-700 active:bg-gray-600 transition-colors"
                 aria-label="Forward 10 seconds"
               >
-                <SkipForwardIcon className="w-5 h-5 sm:w-6 sm:h-6" />
+                <SkipForwardIcon className="w-7 h-7 sm:w-6 sm:h-6" />
               </button>
             )}
 

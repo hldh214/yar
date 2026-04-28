@@ -776,7 +776,7 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
   const [noaItems, setNoaItems] = useState<NoaItem[]>([]);
   const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const { playLive, playTimefree, seek, seekLive, currentInfo, isPlaying, isBehindLive } = usePlayer();
+  const { playLive, playTimefree, seekLive, currentInfo, isPlaying, isBehindLive } = usePlayer();
 
   const scheduleRef = useRef<HTMLDivElement>(null);
   const onAirRef = useRef<HTMLDivElement>(null);
@@ -814,7 +814,7 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
             || d.programs?.find((p: Program) => p.startTime <= dl.ft && dl.ft < p.endTime);
           if (match) {
             setSelectedProgramId(match.id);
-            return; // auto-play handled by separate effect after data is set
+            return;
           }
           // If not found on this date, the deep-link ft may belong to a different broadcast date.
           // Extract the broadcast date from ft (radiko day starts at 05:00 JST).
@@ -849,57 +849,6 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [stationId, selectedDate, todayStr]);
-
-  // Deep-link auto-play: once data loads and the matching program is selected,
-  // trigger playback. If the program is currently on-air, start live + seek back;
-  // otherwise start timefree.
-  useEffect(() => {
-    const dl = deepLinkRef.current;
-    if (!dl || !data || !selectedProgram) return;
-    // Match: ft is exact program start, or ft falls within the selected program's range
-    const inRange = selectedProgram.startTime <= dl.ft && dl.ft < selectedProgram.endTime;
-    if (selectedProgram.startTime !== dl.ft && !inRange) return;
-    // Consume deep-link so it only fires once
-    const seekTo = dl.t;
-    deepLinkRef.current = null;
-
-    if (selectedProgram.isOnAir && seekTo && seekTo > 0) {
-      // Program is currently on-air: start live then seek back to the saved position
-      playLive({
-        stationId: data.station.id,
-        stationName: data.station.name,
-        stationLogo: data.station.logoUrl,
-        artworkUrl: selectedProgram.imageUrl || data.station.logoUrl,
-        type: 'live',
-        title: selectedProgram.title,
-        performer: selectedProgram.performer || data.station.name,
-        ft: selectedProgram.startTime,
-        to: selectedProgram.endTime,
-      });
-      const timer = setTimeout(() => seekLive(seekTo), 1500);
-      return () => clearTimeout(timer);
-    }
-
-    // Ended program or no seek position: use timefree
-    playTimefree({
-      stationId: data.station.id,
-      stationName: data.station.name,
-      stationLogo: data.station.logoUrl,
-      artworkUrl: selectedProgram.imageUrl || data.station.logoUrl,
-      type: 'timefree',
-      title: selectedProgram.title,
-      performer: selectedProgram.performer || data.station.name,
-      ft: selectedProgram.startTime,
-      to: selectedProgram.endTime,
-      duration: selectedProgram.duration,
-    });
-    // Seek to specific position after a short delay (wait for stream to load)
-    if (seekTo && seekTo > 0) {
-      const timer = setTimeout(() => seek(seekTo), 1500);
-      return () => clearTimeout(timer);
-    }
-  }, [data, selectedProgram, playLive, playTimefree, seek, seekLive]);
-
 
   // Fetch NOA (now-on-air) for live display.
   // Only poll when viewing today AND the selected program is on-air (10s interval).
@@ -1035,6 +984,12 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
   const handlePlayLive = useCallback(() => {
     if (!data) return;
     const onAir = data.programs.find((p) => p.isOnAir);
+    const dl = deepLinkRef.current;
+    const matchesDeepLink = !!(onAir && dl?.ft && onAir.startTime <= dl.ft && dl.ft < onAir.endTime);
+    const seekTo = matchesDeepLink ? dl?.t : undefined;
+    if (matchesDeepLink) {
+      deepLinkRef.current = null;
+    }
     playLive({
       stationId: data.station.id,
       stationName: data.station.name,
@@ -1050,13 +1005,23 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
     if (onAir) {
       setSelectedProgramId(onAir.id);
     }
+    if (seekTo && seekTo > 0) {
+      setTimeout(() => seekLive(seekTo), 1500);
+    }
     // Clear timefree params from URL
     window.history.replaceState(null, '', window.location.pathname);
-  }, [data, playLive]);
+  }, [data, playLive, seekLive]);
 
   const handlePlayTimefree = useCallback(
     (program: Program) => {
       if (!data) return;
+      const dl = deepLinkRef.current;
+      const inRange = dl?.ft && program.startTime <= dl.ft && dl.ft < program.endTime;
+      const matchesDeepLink = !!(dl && (program.startTime === dl.ft || inRange));
+      const seekTo = matchesDeepLink ? dl?.t : undefined;
+      if (matchesDeepLink) {
+        deepLinkRef.current = null;
+      }
       // Start playback
       playTimefree({
         stationId: data.station.id,
@@ -1069,11 +1034,11 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
         ft: program.startTime,
         to: program.endTime,
         duration: program.duration,
-      });
+      }, seekTo || 0);
       // Select the program so details are shown on the left
       setSelectedProgramId(program.id);
       // Update URL with timefree params
-      const params = new URLSearchParams({ ft: program.startTime });
+      const params = new URLSearchParams({ ft: program.startTime, ...(seekTo && seekTo > 0 ? { t: String(seekTo) } : {}) });
       window.history.replaceState(null, '', `${window.location.pathname}?${params}`);
     },
     [data, playTimefree]
