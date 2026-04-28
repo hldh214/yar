@@ -1,6 +1,8 @@
 'use client';
 
 import { usePlayer, usePlayerTime } from '@/lib/player-context';
+import { Loader2, Pause, Play, Volume1, Volume2, VolumeX } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 function formatSeconds(s: number): string {
@@ -200,14 +202,19 @@ function ProgressBar({
   return (
     <div className="flex items-center gap-2 sm:gap-3 w-full">
       {/* Elapsed time */}
-      <span className="text-xs sm:text-[11px] font-mono text-gray-400 w-12 sm:w-14 text-right flex-shrink-0 select-none tabular-nums">
+      <span className="text-xs sm:text-[11px] font-mono text-gray-500 dark:text-gray-400 w-12 sm:w-14 text-right flex-shrink-0 select-none tabular-nums">
         {ft ? absoluteTime(ft, displayTime) : formatSeconds(displayTime)}
       </span>
 
       {/* Track container: tall hit area, thin visible track */}
       <div
         ref={trackRef}
-        className="relative flex-1 h-9 sm:h-5 flex items-center cursor-pointer touch-none group"
+        role="slider"
+        aria-label="Seek playback"
+        aria-valuemin={0}
+        aria-valuemax={Math.round(totalDuration)}
+        aria-valuenow={Math.round(displayTime)}
+        className="relative flex-1 h-10 sm:h-5 flex items-center cursor-pointer touch-none group"
         onMouseDown={handleMouseDown}
         onTouchStart={handleTouchStart}
         onMouseMove={handleMouseMove}
@@ -215,7 +222,7 @@ function ProgressBar({
         onMouseLeave={() => { if (!draggingRef.current) setInteracting(false); }}
       >
         {/* Track background */}
-        <div className={`w-full rounded-full bg-gray-600/80 transition-[height] duration-150 ${
+        <div className={`w-full rounded-full bg-gray-200 dark:bg-gray-700 transition-[height] duration-150 ${
           interacting || dragging ? 'h-2.5 sm:h-1.5' : 'h-2 sm:h-1'
         }`}>
           {/* Fill */}
@@ -227,7 +234,7 @@ function ProgressBar({
 
         {/* Thumb */}
         <div
-          className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 rounded-full transition-[width,height,opacity] duration-150 shadow-sm ${
+          className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 rounded-full ring-2 ring-white dark:ring-gray-900 transition-[width,height,opacity] duration-150 shadow-sm ${
             interacting || dragging
               ? 'w-5 h-5 sm:w-3.5 sm:h-3.5 opacity-100'
               : 'w-4 h-4 sm:w-2.5 sm:h-2.5 opacity-90 sm:opacity-80'
@@ -241,7 +248,7 @@ function ProgressBar({
             className="absolute bottom-full mb-2 -translate-x-1/2 pointer-events-none"
             style={{ left: `${tooltipRatio * 100}%` }}
           >
-            <div className="bg-gray-800 text-white text-[11px] font-mono px-2 py-0.5 rounded shadow-lg whitespace-nowrap border border-gray-600/50">
+            <div className="bg-gray-900 text-white text-[11px] font-mono px-2 py-0.5 rounded shadow-lg whitespace-nowrap border border-gray-700">
               {absoluteTime(ft, tooltipTime)}
             </div>
           </div>
@@ -252,7 +259,7 @@ function ProgressBar({
       {hideEndTime ? (
         <span className="w-12 sm:w-14 flex-shrink-0" />
       ) : (
-        <span className="text-xs sm:text-[11px] font-mono text-gray-400 w-12 sm:w-14 text-left flex-shrink-0 select-none tabular-nums">
+        <span className="text-xs sm:text-[11px] font-mono text-gray-500 dark:text-gray-400 w-12 sm:w-14 text-left flex-shrink-0 select-none tabular-nums">
           {ft ? absoluteTime(ft, totalDuration) : formatSeconds(totalDuration)}
         </span>
       )}
@@ -322,21 +329,15 @@ function VolumeSlider({ volume, onVolumeChange }: { volume: number; onVolumeChan
     >
       <button
         onClick={toggleMute}
-        className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-white transition-colors"
+        className="w-8 h-8 flex items-center justify-center text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors"
         aria-label={volume > 0 ? 'Mute' : 'Unmute'}
       >
         {volume === 0 ? (
-          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
-          </svg>
+          <VolumeX className="size-4" />
         ) : volume < 0.5 ? (
-          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M18.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM5 9v6h4l5 5V4L9 9H5z"/>
-          </svg>
+          <Volume1 className="size-4" />
         ) : (
-          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
-          </svg>
+          <Volume2 className="size-4" />
         )}
       </button>
       <div
@@ -349,13 +350,13 @@ function VolumeSlider({ volume, onVolumeChange }: { volume: number; onVolumeChan
         aria-valuemin={0}
         aria-valuemax={100}
       >
-        <div className="relative w-full h-1 rounded-full bg-gray-600">
+        <div className="relative w-full h-1 rounded-full bg-gray-200 dark:bg-gray-700">
           <div
-            className={`absolute left-0 top-0 h-full rounded-full transition-colors ${active ? 'bg-white' : 'bg-gray-400'}`}
+            className={`absolute left-0 top-0 h-full rounded-full transition-colors ${active ? 'bg-gray-900 dark:bg-white' : 'bg-gray-500 dark:bg-gray-400'}`}
             style={{ width: pct }}
           />
           <div
-            className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-white shadow transition-opacity ${active ? 'opacity-100' : 'opacity-0'}`}
+            className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-gray-900 dark:bg-white shadow ring-2 ring-white dark:ring-gray-950 transition-opacity ${active ? 'opacity-100' : 'opacity-0'}`}
             style={{ left: pct }}
           />
         </div>
@@ -368,6 +369,7 @@ function VolumeSlider({ volume, onVolumeChange }: { volume: number; onVolumeChan
 
 export default function PlayerBar() {
   const barRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
   const {
     isPlaying,
     isLoading,
@@ -385,7 +387,7 @@ export default function PlayerBar() {
     skipForward,
     skipBackward,
   } = usePlayer();
-  const { currentTime, liveElapsed } = usePlayerTime();
+  const { currentTime, liveElapsed, liveSeekableUntil } = usePlayerTime();
 
   // Set CSS variable for content padding to avoid overlap
   useEffect(() => {
@@ -407,8 +409,6 @@ export default function PlayerBar() {
     };
   }, [currentInfo, error]);
 
-  if (!currentInfo && !error) return null;
-
   const isTimefree = currentInfo?.type === 'timefree';
   const isLive = currentInfo?.type === 'live';
   const hasLiveBar = isLive && !!currentInfo?.ft;
@@ -417,24 +417,49 @@ export default function PlayerBar() {
   const barCurrentTime = isLive
     ? (isBehindLive ? currentTime : liveElapsed)
     : currentTime;
-  const barDuration = isLive ? liveElapsed : duration;
+  const barDuration = isLive ? (isBehindLive ? (liveSeekableUntil || liveElapsed) : liveElapsed) : duration;
   const barColor = isLive
-    ? (isBehindLive ? '#f97316' : '#ef4444') // orange-500 : red-500
-    : '#3b82f6'; // blue-500
+    ? (isBehindLive ? '#e73c64' : '#00a7e9')
+    : '#e73c64';
   const showBar = (isTimefree && duration > 0) || (hasLiveBar && liveElapsed > 0);
   const handleSeek = isLive ? seekLive : seek;
 
   // Hide end time for live (always growing) and timefree of still-airing programs
   const barHideEndTime = isLive || (isTimefree && isOnAirProgram(currentInfo?.to));
 
+  const openCurrentProgram = useCallback(() => {
+    if (!currentInfo?.stationId) return;
+
+    const path = `/station/${encodeURIComponent(currentInfo.stationId)}`;
+    if (!currentInfo.ft || (currentInfo.type === 'live' && !isBehindLive)) {
+      router.push(path, { scroll: false });
+      return;
+    }
+
+    const params = new URLSearchParams({ ft: currentInfo.ft });
+    const t = Math.floor(currentTime);
+    if (t > 0) params.set('t', String(t));
+    router.push(`${path}?${params}`, { scroll: false });
+  }, [currentInfo, currentTime, isBehindLive, router]);
+
+  if (!currentInfo && !error) return null;
+
   return (
-    <div ref={barRef} className="fixed bottom-0 left-0 right-0 z-50 bg-gray-900 text-white shadow-lg pb-safe">
+    <div
+      ref={barRef}
+      className={`fixed bottom-0 left-0 right-0 z-50 border-t-2 bg-white text-gray-900 shadow-[0_-2px_2px_rgba(0,0,0,0.10)] pb-safe dark:bg-gray-950 dark:text-gray-100 ${
+        isLive && !isBehindLive
+          ? 'border-t-[#00a7e9]'
+          : (isLive && isBehindLive) || isTimefree
+            ? 'border-t-[#e73c64]'
+            : 'border-t-[#d9d9d9]'
+      }`}
+    >
       {/* Live-only pulse bar when no ft available */}
       {isLive && !hasLiveBar && (
-        <div className="h-0.5 bg-red-500 animate-pulse" />
+        <div className="h-0.5 bg-[#00a7e9] animate-pulse" />
       )}
-
-      <div className="max-w-screen-xl mx-auto px-4 sm:px-4">
+      <div className="max-w-screen-xl mx-auto px-3 sm:px-4">
         {/* Progress bar row */}
         {showBar && (
           <div className="pt-2.5 sm:pt-2">
@@ -450,14 +475,19 @@ export default function PlayerBar() {
         )}
 
         {/* Controls row */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-3 py-3 sm:py-2.5">
-          <div className="flex items-center gap-3 min-w-0 sm:flex-1">
+        <div className="flex flex-col gap-2.5 py-2.5 sm:flex-row sm:items-center sm:gap-3 sm:py-2.5">
+          <button
+            type="button"
+            onClick={openCurrentProgram}
+            className="flex items-center gap-3 min-w-0 rounded text-left transition-colors hover:bg-[#f2f2f2] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00a7e9] active:bg-[#f2f2f2] sm:flex-1 dark:hover:bg-gray-900 dark:active:bg-gray-900"
+            aria-label="Open current program"
+          >
             {/* Station logo */}
             {currentInfo?.stationLogo && (
               <img
                 src={currentInfo.stationLogo}
                 alt={currentInfo.stationName}
-                className="w-11 h-11 sm:w-10 sm:h-10 rounded-lg sm:rounded object-contain bg-white flex-shrink-0"
+                className="size-11 sm:size-10 rounded object-contain bg-white flex-shrink-0 border border-gray-100 dark:border-gray-800"
               />
             )}
 
@@ -465,41 +495,41 @@ export default function PlayerBar() {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5 sm:gap-2">
                 {isLive && !isBehindLive && (
-                  <span className="text-[10px] font-bold bg-red-600 text-white px-1.5 py-0.5 rounded flex-shrink-0">
+                  <span className="inline-flex h-5 items-center gap-1 rounded bg-[#00a7e9] px-1.5 text-[10px] font-bold text-white flex-shrink-0">
+                    <span className="size-1.5 rounded-full bg-white animate-pulse" />
                     LIVE
                   </span>
                 )}
                 {isLive && isBehindLive && (
-                  <span className="text-[10px] font-bold bg-orange-500 text-white px-1.5 py-0.5 rounded flex-shrink-0">
+                  <span className="inline-flex h-5 items-center rounded bg-[#e73c64] px-1.5 text-[10px] font-bold text-white flex-shrink-0">
                     BEHIND
                   </span>
                 )}
                 {isTimefree && (
-                  <span className="text-[10px] font-bold bg-blue-600 text-white px-1.5 py-0.5 rounded flex-shrink-0">
+                  <span className="inline-flex h-5 items-center rounded bg-[#e73c64] px-1.5 text-[10px] font-bold text-white flex-shrink-0">
                     TF
                   </span>
                 )}
-                <span className="text-sm sm:text-sm font-medium truncate">
+                <span className="text-sm font-semibold truncate">
                   {currentInfo?.title || currentInfo?.stationName || 'Unknown'}
                 </span>
               </div>
-              <p className="text-xs text-gray-400 truncate">
+              <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
                 {currentInfo?.performer || currentInfo?.stationName}
               </p>
-              {error && <p className="text-xs text-red-400 mt-0.5 line-clamp-2 sm:line-clamp-none">{error}</p>}
+              {error && <p className="text-xs text-red-500 mt-0.5 line-clamp-2 sm:line-clamp-none">{error}</p>}
             </div>
-          </div>
+          </button>
 
           {/* Controls */}
-          <div className="flex items-center justify-center gap-2 sm:gap-1.5 w-full sm:w-auto flex-shrink-0">
+          <div className="flex items-center justify-center gap-2 sm:gap-1.5 w-full sm:w-auto flex-shrink-0 rounded-full border border-[#d9d9d9] bg-[#f2f2f2] px-2 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] dark:border-gray-800 dark:bg-gray-900 sm:px-2 sm:py-1">
             {/* Back to Live */}
             {isLive && isBehindLive && (
               <button
                 onClick={backToLive}
-                className="min-h-11 sm:min-h-0 flex items-center gap-1 px-3 sm:px-2.5 py-2 sm:py-1.5 rounded-full text-xs sm:text-xs font-medium bg-red-600 text-white hover:bg-red-500 active:bg-red-700 transition-colors"
+                className="h-10 rounded-full bg-[#00a7e9] px-3 text-xs font-semibold text-white transition-colors hover:bg-[#50cdff] active:bg-[#008dc5] sm:h-8 sm:px-2.5"
                 aria-label="Back to live"
               >
-                <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
                 Live
               </button>
             )}
@@ -508,10 +538,10 @@ export default function PlayerBar() {
             {(isTimefree || hasLiveBar) && (
               <button
                 onClick={skipBackward}
-                className="w-12 h-12 sm:w-9 sm:h-9 flex items-center justify-center rounded-full text-gray-300 bg-gray-800/80 sm:bg-transparent hover:text-white hover:bg-gray-700 active:bg-gray-600 transition-colors"
+                className="size-11 sm:size-9 flex items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-gray-700 transition-colors hover:bg-gray-50 active:bg-gray-100 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-gray-900"
                 aria-label="Back 10 seconds"
               >
-                <SkipBackIcon className="w-7 h-7 sm:w-6 sm:h-6" />
+                <SkipBackIcon className="size-7 sm:size-6" />
               </button>
             )}
 
@@ -519,22 +549,23 @@ export default function PlayerBar() {
             <button
               onClick={isPlaying ? pause : resume}
               disabled={isLoading && !isPlaying}
-              className="w-14 h-14 sm:w-11 sm:h-11 flex items-center justify-center rounded-full bg-white text-gray-900 hover:bg-gray-200 active:bg-gray-300 disabled:opacity-50 transition-colors shadow-sm"
+              className={`size-14 sm:size-11 flex items-center justify-center rounded-full text-white shadow-[0_1px_2px_rgba(0,0,0,0.16)] transition-colors disabled:opacity-50 ${
+                isLive && !isBehindLive
+                  ? 'bg-[#00a7e9] hover:bg-[#50cdff] active:bg-[#008dc5]'
+                  : isLive && isBehindLive
+                    ? 'bg-[#e73c64] hover:bg-[#f25b7f] active:bg-[#c50e39]'
+                    : isTimefree
+                      ? 'bg-[#e73c64] hover:bg-[#f25b7f] active:bg-[#c50e39]'
+                      : 'bg-gray-900 hover:bg-gray-800 active:bg-black'
+              }`}
               aria-label={isPlaying ? 'Pause' : 'Play'}
             >
               {isLoading ? (
-                <svg className="w-6 h-6 sm:w-5 sm:h-5 animate-spin" viewBox="0 0 24 24" fill="none">
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="31.4 31.4" />
-                </svg>
+                <Loader2 className="size-7 animate-spin sm:size-5" />
               ) : isPlaying ? (
-                <svg className="w-6 h-6 sm:w-5 sm:h-5" viewBox="0 0 24 24" fill="currentColor">
-                  <rect x="6" y="4" width="4" height="16" rx="1" />
-                  <rect x="14" y="4" width="4" height="16" rx="1" />
-                </svg>
+                <Pause className="size-7 fill-current sm:size-5" />
               ) : (
-                <svg className="w-6 h-6 sm:w-5 sm:h-5 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
+                <Play className="ml-0.5 size-7 fill-current sm:size-5" />
               )}
             </button>
 
@@ -542,10 +573,10 @@ export default function PlayerBar() {
             {(isTimefree || (hasLiveBar && isBehindLive)) && (
               <button
                 onClick={skipForward}
-                className="w-12 h-12 sm:w-9 sm:h-9 flex items-center justify-center rounded-full text-gray-300 bg-gray-800/80 sm:bg-transparent hover:text-white hover:bg-gray-700 active:bg-gray-600 transition-colors"
+                className="size-11 sm:size-9 flex items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-gray-700 transition-colors hover:bg-gray-50 active:bg-gray-100 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-gray-900"
                 aria-label="Forward 10 seconds"
               >
-                <SkipForwardIcon className="w-7 h-7 sm:w-6 sm:h-6" />
+                <SkipForwardIcon className="size-7 sm:size-6" />
               </button>
             )}
 

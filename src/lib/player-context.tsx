@@ -4,6 +4,9 @@ import React, { createContext, useContext, useCallback, useRef, useState, useEff
 import Hls from 'hls.js';
 import { getVolume, saveVolume as persistVolume, recordStationPlay } from '@/lib/storage';
 
+const TIMEFREE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const TIMEFREE_EXPIRED_MESSAGE = 'Timefree playback is only available for programs from the last 7 days.';
+
 // Parse YYYYMMDDHHmmss (JST) into a UTC Date
 function parseRadikoDate(str: string): Date {
   const y = parseInt(str.substring(0, 4), 10);
@@ -67,10 +70,11 @@ interface PlayerContextType {
 interface PlayerTimeContextType {
   currentTime: number;
   liveElapsed: number;
+  liveSeekableUntil: number;
 }
 
 const PlayerContext = createContext<PlayerContextType | null>(null);
-const PlayerTimeContext = createContext<PlayerTimeContextType>({ currentTime: 0, liveElapsed: 0 });
+const PlayerTimeContext = createContext<PlayerTimeContextType>({ currentTime: 0, liveElapsed: 0, liveSeekableUntil: 0 });
 
 export function usePlayer() {
   const ctx = useContext(PlayerContext);
@@ -169,6 +173,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   // Live elapsed: seconds since program ft (derived from stream EXT-X-PROGRAM-DATE-TIME)
   const [liveElapsed, setLiveElapsed] = useState(0);
   const liveElapsedRef = useRef(0);
+  const [liveSeekableUntil, setLiveSeekableUntil] = useState(0);
+  const liveEdgeElapsedRef = useRef(0);
+  const liveEdgeCapturedAtMsRef = useRef(0);
   const usesNativeHlsRef = useRef(false);
   const liveClockFallbackAtMsRef = useRef(0);
   // Offset (ms) = Date.now() - streamTime. Derived from EXT-X-PROGRAM-DATE-TIME.
@@ -207,12 +214,30 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       if (drift === null) return; // Wait for first FRAG_CHANGED
       const nowMs = Date.now() - drift;
       const elapsed = (nowMs - ftDate.getTime()) / 1000;
-      setLiveElapsed(Math.max(0, elapsed));
+      const nextElapsed = Math.max(0, elapsed);
+      liveEdgeElapsedRef.current = nextElapsed;
+      liveEdgeCapturedAtMsRef.current = Date.now();
+      setLiveElapsed(nextElapsed);
+      setLiveSeekableUntil(nextElapsed);
     };
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [currentInfo, isBehindLive, isPlaying]);
+
+  useEffect(() => {
+    if (!currentInfo || currentInfo.type !== 'live' || !currentInfo.ft) return;
+    if (!isBehindLive) return;
+    const tick = () => {
+      const capturedAt = liveEdgeCapturedAtMsRef.current;
+      const base = liveEdgeElapsedRef.current;
+      if (!capturedAt || base <= 0) return;
+      setLiveSeekableUntil(base + Math.max(0, (Date.now() - capturedAt) / 1000));
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [currentInfo, isBehindLive]);
 
   // Auto-update currentInfo when live program transitions to next program.
   // Uses the stream-derived clock (Date.now() - clockDriftMs) so the switch
@@ -680,6 +705,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const playTimefree = useCallback(
     async (info: PlaybackInfo, seekTime = 0, autoPlay = true) => {
       try {
+        if (info.to) {
+          const endDate = parseRadikoDate(info.to);
+          const now = new Date();
+          if (!(endDate < now && endDate > new Date(now.getTime() - TIMEFREE_MAX_AGE_MS))) {
+            setError(TIMEFREE_EXPIRED_MESSAGE);
+            setIsLoading(false);
+            return;
+          }
+        }
         recordStationPlay({
           id: info.stationId,
           name: info.stationName,
@@ -854,10 +888,23 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       const info = currentInfoRef.current;
       if (!info || !info.ft) return;
       const ftDate = parseRadikoDate(info.ft);
-      // Use stream time for "how far along we are" to match the displayed time
+      // In behind-live mode the HLS fragment clock reflects the behind position,
+      // not the live edge. Keep using the last live edge elapsed value for seek bounds.
       const drift = clockDriftMsRef.current;
       const refMs = drift !== null ? (Date.now() - drift) : Date.now();
-      const nowElapsed = (refMs - ftDate.getTime()) / 1000;
+      const streamElapsed = (refMs - ftDate.getTime()) / 1000;
+      const computedLiveEdgeElapsed = Math.max(0, streamElapsed, liveElapsedRef.current);
+      const advancedCapturedEdge = liveEdgeCapturedAtMsRef.current && liveEdgeElapsedRef.current > 0
+        ? liveEdgeElapsedRef.current + Math.max(0, (Date.now() - liveEdgeCapturedAtMsRef.current) / 1000)
+        : 0;
+      const nowElapsed = isBehindLiveRef.current
+        ? Math.max(advancedCapturedEdge, computedLiveEdgeElapsed)
+        : computedLiveEdgeElapsed;
+      if (!isBehindLiveRef.current) {
+        liveEdgeElapsedRef.current = nowElapsed;
+        liveEdgeCapturedAtMsRef.current = Date.now();
+        setLiveSeekableUntil(nowElapsed);
+      }
       const clampedTime = Math.max(0, Math.min(time, nowElapsed));
 
       // If seeking close to the live edge (within 5s), go back to live
@@ -1049,8 +1096,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   // High-frequency time context — updates ~4x/sec, only consumed by
   // components that actually need the playback position (e.g., progress bar).
   const timeValue = useMemo<PlayerTimeContextType>(
-    () => ({ currentTime, liveElapsed }),
-    [currentTime, liveElapsed]
+    () => ({ currentTime, liveElapsed, liveSeekableUntil }),
+    [currentTime, liveElapsed, liveSeekableUntil]
   );
 
   return (

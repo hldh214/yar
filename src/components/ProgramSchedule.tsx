@@ -1,8 +1,14 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo, useRef, memo } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { usePlayer, usePlayerTime } from '@/lib/player-context';
 import { formatTime, parseRadikoDate } from '@/lib/radiko-parser';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
+import { CalendarDays, Clock3, Disc3, ExternalLink, ImageIcon, ListMusic, Music2, Play, Radio, UserRound, X } from 'lucide-react';
 
 interface Program {
   id: string;
@@ -94,6 +100,26 @@ function parseFtMs(ft: string): number {
   return Date.UTC(y, mo, d, h - 9, min, sec);
 }
 
+function getBroadcastDateFromFt(ft: string): string {
+  const h = parseInt(ft.substring(8, 10), 10);
+  if (h >= 5) return ft.substring(0, 8);
+
+  const y = parseInt(ft.substring(0, 4), 10);
+  const m = parseInt(ft.substring(4, 6), 10) - 1;
+  const day = parseInt(ft.substring(6, 8), 10);
+  const prev = new Date(y, m, day - 1);
+  return `${prev.getFullYear()}${String(prev.getMonth() + 1).padStart(2, '0')}${String(prev.getDate()).padStart(2, '0')}`;
+}
+
+const TIMEFREE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+function isTimefreeAvailable(program: Pick<Program, 'endTime'>, now = new Date()): boolean {
+  const endDate = parseRadikoDate(program.endTime);
+  return endDate < now && endDate > new Date(now.getTime() - TIMEFREE_MAX_AGE_MS);
+}
+
+const TIMEFREE_EXPIRED_MESSAGE = 'Timefree playback is only available for programs from the last 7 days.';
+
 // Find the song that is playing at a given offset (seconds) from ft
 function findSongAtTime(songs: NoaItem[], ft: string, offsetSec: number): NoaItem | null {
   if (!songs.length || !ft) return null;
@@ -171,8 +197,8 @@ function SongList({ stationId, ft, to, compact, liveNoaItems }: {
     return (
       <div className="py-3">
         <div className="animate-pulse flex gap-2 items-center">
-          <div className="w-4 h-4 bg-gray-200 dark:bg-gray-700 rounded-full" />
-          <div className="h-3 w-32 bg-gray-200 dark:bg-gray-700 rounded" />
+          <div className="size-8 rounded-full bg-muted" />
+          <div className="h-3 w-32 rounded bg-muted" />
         </div>
       </div>
     );
@@ -187,23 +213,23 @@ function SongList({ stationId, ft, to, compact, liveNoaItems }: {
 
   return (
     <div className="space-y-1">
-      <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
-        Songs ({displaySongs.length})
-      </h3>
+      <div className="mb-3 flex items-center gap-2">
+        <Music2 className="size-4 text-[#e73c64]" />
+        <h3 className="text-sm font-semibold tracking-tight">Songs</h3>
+        <Badge variant="secondary" className="rounded-full px-2 py-0 text-[10px]">{displaySongs.length}</Badge>
+      </div>
       {sorted.map((song) => (
-        <div key={song.id} className={`flex items-start gap-2.5 ${compact ? 'py-1.5' : 'py-2'}`}>
+        <div key={song.id} className={cn('flex items-start gap-3 rounded-lg transition-colors hover:bg-accent/60', compact ? 'p-1.5' : 'p-2')}>
           {isRealImage(song.img) ? (
             <img src={song.img} alt="" className={`rounded object-cover flex-shrink-0 ${compact ? 'w-8 h-8' : 'w-10 h-10'}`} />
           ) : (
-            <div className={`rounded bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0 ${compact ? 'w-8 h-8' : 'w-10 h-10'}`}>
-              <svg className="w-4 h-4 text-gray-400" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
-              </svg>
+            <div className={`rounded bg-muted flex items-center justify-center flex-shrink-0 ${compact ? 'w-8 h-8' : 'w-10 h-10'}`}>
+              <Music2 className="size-4 text-muted-foreground" />
             </div>
           )}
           <div className="flex-1 min-w-0">
             <p className={`font-medium truncate leading-tight ${compact ? 'text-xs' : 'text-sm'}`}>{song.title}</p>
-            <p className={`text-gray-500 dark:text-gray-400 truncate leading-tight ${compact ? 'text-[11px]' : 'text-xs'}`}>{song.artist}</p>
+            <p className={`text-muted-foreground truncate leading-tight ${compact ? 'text-[11px]' : 'text-xs'}`}>{song.artist}</p>
             {(song.itunes || song.amazon) && (
               <div className="flex gap-2 mt-0.5">
                 {song.itunes && (
@@ -221,7 +247,7 @@ function SongList({ stationId, ft, to, compact, liveNoaItems }: {
               </div>
             )}
           </div>
-          <span className="text-[10px] text-gray-400 dark:text-gray-500 font-mono flex-shrink-0 mt-0.5">
+          <span className="text-[10px] text-muted-foreground font-mono flex-shrink-0 mt-0.5">
             {formatStamp(song.stamp)}
           </span>
         </div>
@@ -278,18 +304,18 @@ function NowPlayingSongBar({
   return (
     <div className={`flex items-center gap-2 sm:gap-2.5 p-2 sm:p-2.5 rounded-lg bg-gradient-to-r border ${
       isTimefreeMode
-        ? 'from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 border-blue-200/60 dark:border-blue-800/40'
-        : 'from-green-50 to-emerald-50 dark:from-green-950/20 dark:to-emerald-950/20 border-green-200/60 dark:border-green-800/40'
+            ? 'from-[#fdf2f2] to-[#fff7f9] dark:from-[#3a101b]/40 dark:to-[#2a0b13]/40 border-[#e73c64]/30'
+            : 'from-[#e2f4f9] to-[#f5fcff] dark:from-[#0f2f3a]/40 dark:to-[#071f28]/40 border-[#00a7e9]/30'
     }`}>
       {isRealImage(song.img) ? (
         <img src={song.img} alt="" className="w-9 h-9 sm:w-10 sm:h-10 rounded shadow-sm object-cover flex-shrink-0" />
       ) : (
         <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded flex items-center justify-center flex-shrink-0 ${
           isTimefreeMode
-            ? 'bg-blue-100 dark:bg-blue-900/30'
-            : 'bg-green-100 dark:bg-green-900/30'
+            ? 'bg-[#fdf2f2] dark:bg-[#3a101b]/40'
+            : 'bg-[#e2f4f9] dark:bg-[#0f2f3a]/40'
         }`}>
-          <svg className={`w-5 h-5 ${isTimefreeMode ? 'text-blue-500' : 'text-green-500'}`} viewBox="0 0 24 24" fill="currentColor">
+          <svg className={`w-5 h-5 ${isTimefreeMode ? 'text-[#e73c64]' : 'text-[#00a7e9]'}`} viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
           </svg>
         </div>
@@ -297,16 +323,16 @@ function NowPlayingSongBar({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1">
           {isTimefreeMode ? (
-            <svg className="w-3 h-3 text-blue-500 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
+            <svg className="w-3 h-3 text-[#e73c64] flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
             </svg>
           ) : (
-            <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse flex-shrink-0" />
+            <span className="w-1.5 h-1.5 bg-[#00a7e9] rounded-full animate-pulse flex-shrink-0" />
           )}
           <span className={`text-[10px] font-semibold uppercase tracking-wide ${
             isTimefreeMode
-              ? 'text-blue-600 dark:text-blue-400'
-              : 'text-green-600 dark:text-green-400'
+              ? 'text-[#e73c64]'
+              : 'text-[#00a7e9]'
           }`}>
             {isTimefreeMode ? 'Listening' : 'Now Playing'}
           </span>
@@ -366,7 +392,7 @@ const ProgramDetail = memo(function ProgramDetail({
   if (!station) {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="animate-spin w-8 h-8 border-2 border-gray-300 border-t-blue-500 rounded-full" />
+        <div className="animate-spin w-8 h-8 border-2 border-gray-300 border-t-[#00a7e9] rounded-full" />
       </div>
     );
   }
@@ -376,54 +402,50 @@ const ProgramDetail = memo(function ProgramDetail({
      (currentInfo?.type === 'live' && program.isOnAir));
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Station header */}
-      <div className="flex items-center gap-3">
-        <img
-          src={station.logoUrl}
-          alt={station.name}
-          className="w-11 h-11 rounded-lg object-contain bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex-shrink-0 p-1"
-        />
-        <div className="flex-1 min-w-0">
-          <h1 className="text-base font-bold truncate">{station.name}</h1>
-          {station.asciiName && (
-            <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">{station.asciiName}</p>
-          )}
-        </div>
-        <button
-          onClick={onPlayLive}
-          className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-sm font-medium transition-all flex-shrink-0 shadow-sm ${
-            isStationLive
-              ? 'bg-red-500 text-white shadow-red-200 dark:shadow-red-900/30'
-              : 'bg-blue-500 text-white hover:bg-blue-600 shadow-blue-200 dark:shadow-blue-900/30'
-          }`}
-        >
-          {isStationLive ? (
-            <>
-              <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
-              On Air
-            </>
-          ) : (
-            <>
-              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M8 5v14l11-7z" />
-              </svg>
-              Live
-            </>
-          )}
-        </button>
-      </div>
+    <div className="flex flex-col gap-4 sm:gap-5">
+      <Card className="overflow-hidden border-border/70 py-0 shadow-sm sm:shadow-md">
+        <CardHeader className="flex flex-row items-center gap-3 px-4 py-3 sm:px-6 sm:py-4">
+          <img
+            src={station.logoUrl}
+            alt={station.name}
+            className="size-12 rounded-xl border bg-white object-contain p-1 shadow-xs dark:bg-gray-950"
+          />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <h1 className="truncate text-base font-semibold tracking-tight sm:text-lg">{station.name}</h1>
+              {isStationLive && (
+                <Badge className="border-[#00a7e9]/20 bg-[#00a7e9] text-white">
+                  <span className="size-1.5 rounded-full bg-white animate-pulse" />
+                  Live
+                </Badge>
+              )}
+            </div>
+            {station.asciiName && (
+              <p className="truncate text-xs text-muted-foreground">{station.asciiName}</p>
+            )}
+          </div>
+          <Button
+            onClick={onPlayLive}
+            className={cn(
+              'h-11 rounded-full px-4 shadow-sm',
+              isStationLive ? 'bg-[#00a7e9] text-white hover:bg-[#50cdff]' : 'bg-[#00a7e9] text-white hover:bg-[#50cdff]'
+            )}
+          >
+            {isStationLive ? <Radio className="size-4" /> : <Play className="size-4 fill-current" />}
+            {isStationLive ? 'On Air' : 'Live'}
+          </Button>
+        </CardHeader>
+      </Card>
 
       {/* Now playing song bar — isolated component to avoid time-tick re-renders */}
       <NowPlayingSongBar playingSongs={playingSongs} noaItems={noaItems} stationId={stationId} />
 
       {/* Selected program detail */}
       {program ? (
-        <div className="flex flex-col gap-4">
-          {/* Top section: image left, info right */}
-          <div className="flex flex-col sm:flex-row gap-4">
-            {/* Program image - constrained width, 8:5 ratio */}
-            <div className="relative rounded-xl overflow-hidden bg-gray-100 dark:bg-gray-800 flex-shrink-0 w-full sm:w-[240px] md:w-[300px] lg:w-[356px]">
+        <>
+        <Card className="overflow-hidden border-border/70 py-0 shadow-sm sm:shadow-md">
+          <div className="flex flex-col sm:flex-row">
+            <div className="relative bg-muted sm:w-[240px] md:w-[300px] lg:w-[356px] sm:flex-shrink-0">
               {program.imageUrl ? (
                 <div className="aspect-[8/5] w-full">
                   <img
@@ -434,125 +456,103 @@ const ProgramDetail = memo(function ProgramDetail({
                 </div>
               ) : (
                 <div className="aspect-[8/5] w-full flex items-center justify-center">
-                  <svg className="w-12 h-12 text-gray-300 dark:text-gray-600" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM8 15l2.5-3.21 1.79 2.15 2.5-3.22L19 15H5l3 0z" />
-                  </svg>
+                  <ImageIcon className="size-12 text-muted-foreground/50" />
                 </div>
               )}
-              {/* On-air badge overlay */}
               {program.isOnAir && (
-                <div className="absolute top-2 left-2">
-                  <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-red-500 text-white px-1.5 py-0.5 rounded-md shadow-lg">
-                    <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
-                    LIVE
-                  </span>
-                </div>
+                <Badge className="absolute left-3 top-3 border-[#00a7e9]/30 bg-[#00a7e9] text-white shadow-lg">
+                  <span className="size-1.5 rounded-full bg-white animate-pulse" />
+                  LIVE
+                </Badge>
               )}
             </div>
 
-            {/* Program info - right side */}
-            <div className="flex flex-col gap-1.5 flex-1 min-w-0">
-              <h2 className="text-lg font-bold leading-snug">{program.title}</h2>
+            <CardContent className="flex min-w-0 flex-1 flex-col gap-3 px-4 py-4 sm:px-5 sm:py-5">
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {program.isTimefree && <Badge variant="secondary">Timefree</Badge>}
+                  <Badge variant="outline" className="gap-1 text-muted-foreground">
+                    <CalendarDays className="size-3" />
+                    {formatTime(program.startTime)} - {formatTime(program.endTime)}
+                  </Badge>
+                </div>
+                <h2 className="text-xl font-bold leading-tight tracking-tight sm:text-2xl">{program.title}</h2>
+              </div>
               {program.subtitle && (
-                <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">{program.subtitle}</p>
+                <p className="text-sm leading-relaxed text-muted-foreground">{program.subtitle}</p>
               )}
               {program.performer && (
-                <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-                  <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
-                  </svg>
+                <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                  <UserRound className="size-4 flex-shrink-0" />
                   {program.performer}
                 </p>
               )}
-              <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
-                <span className="inline-flex items-center gap-1">
-                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z" />
-                  </svg>
-                  <span className="font-mono">{formatTime(program.startTime)} – {formatTime(program.endTime)}</span>
-                </span>
-                <span className="text-gray-300 dark:text-gray-600">·</span>
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Clock3 className="size-3.5" />
                 <span>{formatDuration(program.duration)}</span>
               </div>
 
-              {/* Play buttons */}
               {(program.isTimefree || program.isOnAir) && (
-                <div className="flex flex-wrap gap-2 mt-1">
+                <div className="flex flex-wrap gap-2 pt-1">
                   {program.isOnAir ? (
-                    <button
+                    <Button
                       onClick={onPlayLive}
-                      className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all shadow-sm ${
-                        isStationLive
-                          ? 'bg-red-500 text-white shadow-red-200 dark:shadow-red-900/30'
-                          : 'bg-blue-500 text-white hover:bg-blue-600 shadow-blue-200 dark:shadow-blue-900/30'
-                      }`}
+                      className={cn('h-11 rounded-full px-5 bg-[#00a7e9] hover:bg-[#50cdff]')}
                     >
-                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M8 5v14l11-7z" />
-                      </svg>
+                      <Play className="size-4 fill-current" />
                       {isStationLive ? 'Listening Live' : 'Listen Live'}
-                    </button>
+                    </Button>
                   ) : program.isTimefree && (
-                    <button
+                    <Button
                       onClick={() => onPlayTimefree(program)}
-                      className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all shadow-sm ${
-                        isThisProgramPlaying
-                          ? 'bg-blue-500 text-white shadow-blue-200 dark:shadow-blue-900/30'
-                          : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-blue-500 hover:text-white'
-                      }`}
+                      variant={isThisProgramPlaying ? 'default' : 'secondary'}
+                      className={cn('h-11 rounded-full px-5', isThisProgramPlaying && 'bg-[#e73c64] hover:bg-[#f25b7f]')}
                     >
-                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M8 5v14l11-7z" />
-                      </svg>
+                      <Play className="size-4 fill-current" />
                       {isThisProgramPlaying ? 'Playing' : 'Timefree'}
-                    </button>
+                    </Button>
                   )}
-                  {/* Program link */}
                   {program.url && (
-                    <a
-                      href={program.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                    >
-                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z" />
-                      </svg>
+                    <Button asChild variant="outline" className="h-11 rounded-full px-5">
+                      <a href={program.url} target="_blank" rel="noopener noreferrer">
+                        <ExternalLink className="size-4" />
                       Website
-                    </a>
+                      </a>
+                    </Button>
                   )}
                 </div>
               )}
-            </div>
+            </CardContent>
           </div>
 
-          {/* Program description / info */}
           {(program.description || program.info) && (
-            <div className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed space-y-2 border-t border-gray-100 dark:border-gray-800 pt-4">
+            <CardContent className="space-y-3 border-t px-4 py-4 text-sm leading-relaxed text-muted-foreground sm:px-5">
               {program.description && (
                 <div className="whitespace-pre-wrap break-words">{program.description}</div>
               )}
               {program.info && (
                 <div className="whitespace-pre-wrap break-words">{program.info}</div>
               )}
-            </div>
+            </CardContent>
           )}
+        </Card>
 
-          {/* Song list */}
+        <Card className="border-border/70 py-0 shadow-sm">
+          <CardContent className="px-4 py-4 sm:px-5">
           <SongList
             stationId={stationId}
             ft={program.startTime}
             to={program.endTime}
             liveNoaItems={program.isOnAir ? noaItems : undefined}
           />
-        </div>
+          </CardContent>
+        </Card>
+        </>
       ) : (
-        <div className="text-center py-16 text-gray-400 dark:text-gray-500">
-          <svg className="w-16 h-16 mx-auto mb-4 text-gray-200 dark:text-gray-700" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
-          </svg>
+        <Card className="border-dashed py-12 text-center text-muted-foreground">
+          <Disc3 className="mx-auto mb-4 size-16 text-muted-foreground/40" />
           <p className="text-sm">Select a program from the schedule</p>
-        </div>
+        </Card>
       )}
     </div>
   );
@@ -581,7 +581,7 @@ const ScheduleList = memo(function ScheduleList({
   onAirRef: React.RefObject<HTMLDivElement | null>;
 }) {
   return (
-    <div className="py-0.5">
+    <div className="space-y-2 p-3 lg:space-y-1 lg:p-1.5">
       {programs.map((program) => {
         const isNowPlaying =
           currentInfo?.stationId === stationId &&
@@ -594,64 +594,58 @@ const ScheduleList = memo(function ScheduleList({
           <div
             key={program.id}
             ref={program.isOnAir && isToday ? onAirRef : undefined}
-            className={`flex items-center gap-2 px-2 sm:px-3 py-1.5 cursor-pointer transition-colors border-l-2 ${
-              isSelected
-                ? 'border-l-blue-500 bg-blue-50 dark:bg-blue-950/20'
-                : program.isOnAir
-                ? 'border-l-red-500 bg-red-50/50 dark:bg-red-950/10'
-                : isNowPlaying
-                ? 'border-l-blue-400 bg-blue-50/50 dark:bg-blue-950/10'
-                : 'border-l-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
-            }`}
+            className={cn(
+              'flex cursor-pointer items-center gap-3 rounded-xl border bg-card p-2.5 shadow-sm transition-all active:scale-[0.99] lg:rounded-lg lg:border-transparent lg:bg-transparent lg:p-2 lg:shadow-none',
+              isSelected && 'border-[#00a7e9] bg-[#e2f4f9] ring-1 ring-[#00a7e9]/30 dark:bg-[#0f2f3a]/40',
+              !isSelected && program.isOnAir && 'border-[#00a7e9]/30 bg-[#e2f4f9]/70 dark:bg-[#0f2f3a]/30',
+              !isSelected && isNowPlaying && 'border-[#e73c64]/30 bg-[#fdf2f2]/70 dark:bg-[#3a101b]/30',
+              !isSelected && !program.isOnAir && !isNowPlaying && 'hover:bg-accent/70'
+            )}
             onClick={() => onSelectProgram(program)}
           >
-            {/* Thumbnail */}
             {program.imageUrl ? (
               <img
                 src={program.imageUrl}
                 alt=""
-                className="w-14 h-[35px] rounded object-cover flex-shrink-0 bg-gray-100 dark:bg-gray-800"
+                className="h-14 w-20 flex-shrink-0 rounded-lg bg-muted object-cover lg:h-[42px] lg:w-16"
               />
             ) : (
-              <div className="w-14 h-[35px] rounded flex-shrink-0 bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
-                <svg className="w-4 h-4 text-gray-300 dark:text-gray-600" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM8 15l2.5-3.21 1.79 2.15 2.5-3.22L19 15H5l3 0z" />
-                </svg>
+              <div className="flex h-14 w-20 flex-shrink-0 items-center justify-center rounded-lg bg-muted lg:h-[42px] lg:w-16">
+                <ImageIcon className="size-5 text-muted-foreground/50" />
               </div>
             )}
 
-            {/* Time + Title + performer */}
             <div className="flex-1 min-w-0">
-              <span className="text-[10px] font-mono text-gray-400 dark:text-gray-500 leading-none">
-                {formatTime(program.startTime)}
-              </span>
-              <p className="text-xs font-medium truncate leading-tight">{program.title}</p>
+              <div className="mb-1 flex items-center gap-1.5">
+                <span className="font-mono text-[11px] leading-none text-muted-foreground">
+                  {formatTime(program.startTime)}
+                </span>
+                {program.isOnAir && (
+                  <Badge className="h-5 border-[#00a7e9]/30 bg-[#00a7e9] px-1.5 text-[10px] text-white">
+                    <span className="size-1.5 rounded-full bg-white animate-pulse" />
+                    Live
+                  </Badge>
+                )}
+              </div>
+              <p className="truncate text-sm font-semibold leading-tight lg:text-xs">{program.title}</p>
               {program.performer && (
-                <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate leading-tight">
+                <p className="mt-0.5 truncate text-xs leading-tight text-muted-foreground lg:text-[11px]">
                   {program.performer}
                 </p>
               )}
             </div>
 
-            {/* Badges */}
-            <div className="flex items-center gap-1 flex-shrink-0">
-              {program.isOnAir && (
-                <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
-              )}
+            <div className="flex flex-shrink-0 items-center gap-1">
               {program.isTimefree && (
-                <button
+                <Button
+                  size="icon"
+                  variant={isNowPlaying ? 'default' : 'ghost'}
                   onClick={(e) => { e.stopPropagation(); onPlayTimefree(program); }}
-                  className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors ${
-                    isNowPlaying
-                      ? 'bg-blue-500 text-white'
-                      : 'text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30'
-                  }`}
+                  className={cn('size-10 rounded-full lg:size-8', isNowPlaying && 'bg-[#e73c64] hover:bg-[#f25b7f]')}
                   title="Play timefree"
                 >
-                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M8 5v14l11-7z" />
-                  </svg>
-                </button>
+                  <Play className="size-4 fill-current" />
+                </Button>
               )}
             </div>
           </div>
@@ -687,32 +681,31 @@ function ScheduleDrawer({
 
   return (
     <div className="fixed inset-0 z-50 lg:hidden">
-      {/* Backdrop */}
       <div
         ref={backdropRef}
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
         onClick={onClose}
       />
-      {/* Sheet */}
-      <div className="absolute bottom-0 left-0 right-0 bg-white dark:bg-gray-900 rounded-t-2xl max-h-[85vh] flex flex-col shadow-2xl animate-slide-up">
-        {/* Handle */}
-        <div className="flex items-center justify-center pt-3 pb-1 flex-shrink-0">
-          <div className="w-10 h-1 rounded-full bg-gray-300 dark:bg-gray-600" />
+      <div className="absolute inset-x-0 bottom-0 flex max-h-[88vh] flex-col rounded-t-3xl border bg-background shadow-2xl animate-slide-up">
+        <div className="flex flex-shrink-0 items-center justify-center pt-3">
+          <div className="h-1.5 w-12 rounded-full bg-muted-foreground/25" />
         </div>
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 pb-2 flex-shrink-0">
-          <h3 className="font-semibold text-base">Schedule</h3>
-          <button
+        <div className="flex flex-shrink-0 items-center justify-between px-4 py-3">
+          <div>
+            <h3 className="text-lg font-semibold tracking-tight">Schedule</h3>
+            <p className="text-xs text-muted-foreground">Pick a program or start timefree playback</p>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={onClose}
-            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            className="size-10 rounded-full"
+            aria-label="Close schedule"
           >
-            <svg className="w-5 h-5 text-gray-500" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-            </svg>
-          </button>
+            <X className="size-5" />
+          </Button>
         </div>
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto min-h-0 pb-safe">
+        <div className="min-h-0 flex-1 overflow-y-auto pb-safe">
           {children}
         </div>
       </div>
@@ -760,6 +753,7 @@ function UrlSync({ stationId }: { stationId: string }) {
 
 // --- Main component ---
 export default function ProgramSchedule({ stationId }: { stationId: string }) {
+  const searchParams = useSearchParams();
   const { dates, todayStr } = useMemo(() => {
     const today = getRadikoBroadcastDate(0);
     const list: string[] = [];
@@ -776,6 +770,8 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
   const [noaItems, setNoaItems] = useState<NoaItem[]>([]);
   const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [deepLinkVersion, setDeepLinkVersion] = useState(0);
+  const [playbackNotice, setPlaybackNotice] = useState<string | null>(null);
   const { playLive, playTimefree, seekLive, currentInfo, isPlaying, isBehindLive } = usePlayer();
 
   const scheduleRef = useRef<HTMLDivElement>(null);
@@ -784,29 +780,47 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
   const deepLinkRef = useRef<{ ft: string; t?: number } | null>(null);
   const preparedDeepLinkRef = useRef<string | null>(null);
   const lastLiveFtRef = useRef<string | null>(null);
+  const consumedPlaybackSyncRef = useRef<string | null>(null);
   const selectedProgram = data?.programs.find((p) => p.id === selectedProgramId) || null;
 
-  // Read deep-link params from URL on mount
+  const playbackSyncKey = currentInfo?.stationId === stationId && currentInfo.ft &&
+    (currentInfo.type === 'timefree' || (currentInfo.type === 'live' && isBehindLive))
+    ? `${stationId}:${currentInfo.type}:${currentInfo.ft}:${isBehindLive}`
+    : null;
+
+  const handleSelectDate = useCallback((date: string) => {
+    deepLinkRef.current = null;
+    preparedDeepLinkRef.current = null;
+    consumedPlaybackSyncRef.current = playbackSyncKey;
+    setSelectedDate(date);
+  }, [playbackSyncKey]);
+
+  // Read deep-link params whenever App Router search params change.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const ft = params.get('ft');
+    const ft = searchParams.get('ft');
     if (ft) {
-      const t = params.get('t');
+      const t = searchParams.get('t');
       deepLinkRef.current = { ft, t: t ? parseInt(t, 10) : undefined };
+      preparedDeepLinkRef.current = null;
+    } else {
+      deepLinkRef.current = null;
     }
-  }, []);
+    setDeepLinkVersion((v) => v + 1);
+  }, [searchParams]);
 
   // Fetch program schedule
   useEffect(() => {
+    let active = true;
     setLoading(true);
     setError(null);
+    setPlaybackNotice(null);
     hasScrolledRef.current = false;
     const params = new URLSearchParams({ stationId, date: selectedDate });
     fetch(`/api/programs?${params}`)
       .then((res) => res.json())
       .then((d) => {
+        if (!active) return;
         if (d.error) throw new Error(d.error);
-        setData(d);
 
         const dl = deepLinkRef.current;
         if (dl) {
@@ -814,22 +828,13 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
           const match = d.programs?.find((p: Program) => p.startTime === dl.ft)
             || d.programs?.find((p: Program) => p.startTime <= dl.ft && dl.ft < p.endTime);
           if (match) {
+            setData(d);
             setSelectedProgramId(match.id);
             return;
           }
           // If not found on this date, the deep-link ft may belong to a different broadcast date.
           // Extract the broadcast date from ft (radiko day starts at 05:00 JST).
-          const h = parseInt(dl.ft.substring(8, 10), 10);
-          const dateFromFt = h < 5
-            ? // Before 05:00 belongs to previous calendar day's broadcast
-              (() => {
-                const y = parseInt(dl.ft.substring(0, 4), 10);
-                const m = parseInt(dl.ft.substring(4, 6), 10) - 1;
-                const day = parseInt(dl.ft.substring(6, 8), 10);
-                const prev = new Date(y, m, day - 1);
-                return `${prev.getFullYear()}${String(prev.getMonth() + 1).padStart(2, '0')}${String(prev.getDate()).padStart(2, '0')}`;
-              })()
-            : dl.ft.substring(0, 8);
+          const dateFromFt = getBroadcastDateFromFt(dl.ft);
           if (dateFromFt !== selectedDate) {
             // Switch to the correct date — this effect will re-run
             setSelectedDate(dateFromFt);
@@ -839,7 +844,30 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
           deepLinkRef.current = null;
         }
 
+        const playbackFt = playbackSyncKey && consumedPlaybackSyncRef.current !== playbackSyncKey &&
+          currentInfo?.stationId === stationId &&
+          (currentInfo.type === 'timefree' || (currentInfo.type === 'live' && isBehindLive))
+          ? currentInfo.ft
+          : undefined;
+        if (playbackFt) {
+          const dateFromPlayback = getBroadcastDateFromFt(playbackFt);
+          if (dateFromPlayback !== selectedDate) {
+            setSelectedDate(dateFromPlayback);
+            return;
+          }
+
+          const match = d.programs?.find((p: Program) => p.startTime === playbackFt)
+            || d.programs?.find((p: Program) => p.startTime <= playbackFt && playbackFt < p.endTime);
+          if (match) {
+            setData(d);
+            setSelectedProgramId(match.id);
+            consumedPlaybackSyncRef.current = playbackSyncKey;
+            return;
+          }
+        }
+
         // Default: auto-select on-air program for today, or first program for past dates
+        setData(d);
         if (selectedDate === todayStr) {
           const onAir = d.programs?.find((p: Program) => p.isOnAir);
           setSelectedProgramId(onAir?.id || d.programs?.[0]?.id || null);
@@ -847,9 +875,17 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
           setSelectedProgramId(d.programs?.[0]?.id || null);
         }
       })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [stationId, selectedDate, todayStr]);
+      .catch((e) => {
+        if (active) setError(e.message);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [stationId, selectedDate, todayStr, currentInfo?.stationId, currentInfo?.type, currentInfo?.ft, isBehindLive, deepLinkVersion, playbackSyncKey]);
 
   // Deep links prepare the player bar without starting playback.
   useEffect(() => {
@@ -861,6 +897,22 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
     const key = `${data.station.id}:${selectedProgram.startTime}:${seekTo}`;
     if (preparedDeepLinkRef.current === key) return;
     preparedDeepLinkRef.current = key;
+
+    if (selectedProgram.isOnAir) return;
+
+    if (!isTimefreeAvailable(selectedProgram)) {
+      setPlaybackNotice(TIMEFREE_EXPIRED_MESSAGE);
+      deepLinkRef.current = null;
+      return;
+    }
+
+    const isAlreadyCurrentPlayback = currentInfo?.stationId === stationId &&
+      currentInfo.ft === selectedProgram.startTime &&
+      (currentInfo.type === 'timefree' || (currentInfo.type === 'live' && isBehindLive));
+    if (isAlreadyCurrentPlayback) {
+      deepLinkRef.current = null;
+      return;
+    }
 
     playTimefree({
       stationId: data.station.id,
@@ -874,7 +926,8 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
       to: selectedProgram.endTime,
       duration: selectedProgram.duration,
     }, seekTo, false);
-  }, [data, selectedProgram, playTimefree]);
+    deepLinkRef.current = null;
+  }, [data, selectedProgram, playTimefree, currentInfo, stationId, isBehindLive]);
 
   // Fetch NOA (now-on-air) for live display.
   // Only poll when viewing today AND the selected program is on-air (10s interval).
@@ -1041,6 +1094,11 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
   const handlePlayTimefree = useCallback(
     (program: Program) => {
       if (!data) return;
+      if (!isTimefreeAvailable(program)) {
+        setPlaybackNotice(TIMEFREE_EXPIRED_MESSAGE);
+        return;
+      }
+      setPlaybackNotice(null);
       const dl = deepLinkRef.current;
       const inRange = dl?.ft && program.startTime <= dl.ft && dl.ft < program.endTime;
       const matchesDeepLink = !!(dl && (program.startTime === dl.ft || inRange));
@@ -1083,28 +1141,31 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
   const scheduleContent = (
     <>
       {/* Date selector - sticky */}
-      <div className="px-3 py-2 overflow-x-auto scrollbar-none border-b border-gray-200 dark:border-gray-700 flex-shrink-0 sticky top-0 z-10 bg-white dark:bg-gray-900">
-        <div className="flex gap-1 min-w-max">
+      <div className="sticky top-0 z-10 flex-shrink-0 overflow-x-auto border-b bg-background/95 px-3 py-2 backdrop-blur scrollbar-none">
+        <div className="flex min-w-max gap-1.5">
           {dates.map((d) => (
-            <button
+            <Button
               key={d}
-              onClick={() => setSelectedDate(d)}
-              className={`px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
-                d === selectedDate
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
-              }`}
+              onClick={() => handleSelectDate(d)}
+              variant={d === selectedDate ? 'default' : 'secondary'}
+              size="sm"
+              className={cn('h-8 rounded-full px-3 text-xs', d === selectedDate && 'bg-[#00a7e9] text-white hover:bg-[#50cdff]')}
             >
               {formatDateLabel(d, todayStr)}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
 
       {/* Schedule list */}
+      {playbackNotice && (
+        <div className="mx-3 mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+          {playbackNotice}
+        </div>
+      )}
       {loading ? (
         <div className="flex items-center justify-center py-10">
-          <div className="animate-spin w-6 h-6 border-2 border-gray-300 border-t-blue-500 rounded-full" />
+          <div className="animate-spin w-6 h-6 border-2 border-gray-300 border-t-[#00a7e9] rounded-full" />
         </div>
       ) : error || !data ? (
         <div className="text-center py-10">
@@ -1162,16 +1223,15 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
       </div>
 
       {/* === Mobile: Floating schedule button === */}
-      <button
+      <Button
         onClick={() => setDrawerOpen(true)}
-        className="lg:hidden fixed right-3 sm:right-4 z-40 w-11 h-11 sm:w-12 sm:h-12 bg-blue-500 text-white rounded-full shadow-lg flex items-center justify-center hover:bg-blue-600 active:bg-blue-700 transition-colors"
+        size="icon"
+        className="fixed right-4 z-40 size-14 rounded-full bg-[#00a7e9] text-white shadow-xl shadow-[#00a7e9]/20 hover:bg-[#50cdff] lg:hidden"
         style={{ bottom: 'calc(var(--player-bar-h, 0px) + 16px)' }}
         aria-label="Open schedule"
       >
-        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z" />
-        </svg>
-      </button>
+        <ListMusic className="size-6" />
+      </Button>
 
       {/* === Mobile: Schedule drawer === */}
       <ScheduleDrawer isOpen={drawerOpen} onClose={() => setDrawerOpen(false)}>
