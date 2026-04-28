@@ -782,6 +782,7 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
   const onAirRef = useRef<HTMLDivElement>(null);
   const hasScrolledRef = useRef(false);
   const deepLinkRef = useRef<{ ft: string; t?: number } | null>(null);
+  const preparedDeepLinkRef = useRef<string | null>(null);
   const lastLiveFtRef = useRef<string | null>(null);
   const selectedProgram = data?.programs.find((p) => p.id === selectedProgramId) || null;
 
@@ -849,6 +850,31 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [stationId, selectedDate, todayStr]);
+
+  // Deep links prepare the player bar without starting playback.
+  useEffect(() => {
+    const dl = deepLinkRef.current;
+    if (!dl || !data || !selectedProgram) return;
+    const inRange = selectedProgram.startTime <= dl.ft && dl.ft < selectedProgram.endTime;
+    if (selectedProgram.startTime !== dl.ft && !inRange) return;
+    const seekTo = dl.t || 0;
+    const key = `${data.station.id}:${selectedProgram.startTime}:${seekTo}`;
+    if (preparedDeepLinkRef.current === key) return;
+    preparedDeepLinkRef.current = key;
+
+    playTimefree({
+      stationId: data.station.id,
+      stationName: data.station.name,
+      stationLogo: data.station.logoUrl,
+      artworkUrl: selectedProgram.imageUrl || data.station.logoUrl,
+      type: 'timefree',
+      title: selectedProgram.title,
+      performer: selectedProgram.performer || data.station.name,
+      ft: selectedProgram.startTime,
+      to: selectedProgram.endTime,
+      duration: selectedProgram.duration,
+    }, seekTo, false);
+  }, [data, selectedProgram, playTimefree]);
 
   // Fetch NOA (now-on-air) for live display.
   // Only poll when viewing today AND the selected program is on-air (10s interval).
