@@ -51,7 +51,7 @@ interface PlayerContextType {
   // Live seek-back: when true, we're playing timefree behind the live edge
   isBehindLive: boolean;
   playLive: (info: PlaybackInfo) => Promise<void>;
-  playTimefree: (info: PlaybackInfo) => Promise<void>;
+  playTimefree: (info: PlaybackInfo, seekTime?: number) => Promise<void>;
   pause: () => void;
   resume: () => void;
   setVolume: (v: number) => void;
@@ -667,15 +667,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   );
 
   const playTimefree = useCallback(
-    async (info: PlaybackInfo) => {
+    async (info: PlaybackInfo, seekTime = 0) => {
       try {
         recordStationPlay({
           id: info.stationId,
           name: info.stationName,
           logoUrl: info.stationLogo,
         });
-        const proxyUrl = await fetchTimefreeProxyUrl(info);
-        await loadHlsStream(proxyUrl, { ...info, type: 'timefree' });
+        const proxyUrl = await fetchTimefreeProxyUrl(info, seekTime);
+        await loadHlsStream(proxyUrl, { ...info, type: 'timefree' }, seekTime);
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to start timefree stream');
         setIsLoading(false);
