@@ -33,30 +33,31 @@ export async function GET(request: NextRequest) {
 
     const areaId = await getAreaIdForStation(stationId);
 
-    // Determine date string
-    let dateStr: string;
-    if (date) {
-      dateStr = date;
-    } else {
-      const now = new Date();
-      const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-      // Radiko broadcast day starts at 5:00 JST
-      if (jst.getUTCHours() < 5) {
-        jst.setUTCDate(jst.getUTCDate() - 1);
-      }
-      const y = jst.getUTCFullYear();
-      const m = String(jst.getUTCMonth() + 1).padStart(2, "0");
-      const d = String(jst.getUTCDate()).padStart(2, "0");
-      dateStr = `${y}${m}${d}`;
+    // Current radiko broadcast day (starts at 5:00 JST)
+    const now = new Date();
+    const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+    if (jst.getUTCHours() < 5) {
+      jst.setUTCDate(jst.getUTCDate() - 1);
     }
+    const todayStr =
+      jst.getUTCFullYear().toString() +
+      String(jst.getUTCMonth() + 1).padStart(2, "0") +
+      String(jst.getUTCDate()).padStart(2, "0");
+
+    const dateStr = date || todayStr;
 
     const url = `https://radiko.jp/v3/program/date/${dateStr}/${areaId}.xml`;
+
+    // Radiko publishes the schedule per broadcast day as a static document.
+    // Past days never change; today's may be edited, so refresh it hourly.
+    const revalidate = dateStr < todayStr ? 86400 : 3600;
 
     const res = await fetch(url, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
       },
+      next: { revalidate },
     });
 
     if (!res.ok) {

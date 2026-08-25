@@ -716,7 +716,16 @@ function ScheduleDrawer({
 // --- URL sync component (isolated to avoid high-frequency re-renders in parent) ---
 // Updates the browser URL with the current playback position every 10s.
 // Works for both timefree and behind-live modes.
-function UrlSync({ stationId }: { stationId: string }) {
+// Every write is recorded in selfWriteRef so the parent can tell its own writes
+// apart from a real navigation (Next patches history.replaceState into the
+// router state, so useSearchParams() fires for our own writes too).
+function UrlSync({
+  stationId,
+  selfWriteRef,
+}: {
+  stationId: string;
+  selfWriteRef: React.RefObject<string | null>;
+}) {
   const { currentInfo, isPlaying, isBehindLive } = usePlayer();
   const { currentTime } = usePlayerTime();
   const lastWrittenRef = useRef(0);
@@ -734,6 +743,7 @@ function UrlSync({ stationId }: { stationId: string }) {
     if (!shouldWrite) {
       // Live at edge: clear any lingering params
       if (currentInfo.type === 'live' && window.location.search) {
+        selfWriteRef.current = '';
         window.history.replaceState(null, '', window.location.pathname);
       }
       return;
@@ -745,8 +755,9 @@ function UrlSync({ stationId }: { stationId: string }) {
     lastWrittenRef.current = t;
 
     const params = new URLSearchParams({ ft, ...(t > 0 ? { t: String(t) } : {}) });
+    selfWriteRef.current = params.toString();
     window.history.replaceState(null, '', `${window.location.pathname}?${params}`);
-  }, [isPlaying, currentInfo, stationId, currentTime, isBehindLive]);
+  }, [isPlaying, currentInfo, stationId, currentTime, isBehindLive, selfWriteRef]);
 
   return null;
 }
@@ -781,6 +792,10 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
   const preparedDeepLinkRef = useRef<string | null>(null);
   const lastLiveFtRef = useRef<string | null>(null);
   const consumedPlaybackSyncRef = useRef<string | null>(null);
+  // Query string of the last URL we wrote ourselves (playback position sync,
+  // play actions). Used to ignore the resulting useSearchParams() update.
+  const selfUrlWriteRef = useRef<string | null>(null);
+  const fetchedKeyRef = useRef<string | null>(null);
   const selectedProgram = data?.programs.find((p) => p.id === selectedProgramId) || null;
 
   const playbackSyncKey = currentInfo?.stationId === stationId && currentInfo.ft &&
@@ -796,7 +811,14 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
   }, [playbackSyncKey]);
 
   // Read deep-link params whenever App Router search params change.
+  // Skip updates caused by our own history.replaceState calls — otherwise the
+  // 10s playback-position sync would keep re-fetching the schedule.
   useEffect(() => {
+    if (selfUrlWriteRef.current !== null && selfUrlWriteRef.current === searchParams.toString()) {
+      selfUrlWriteRef.current = null;
+      return;
+    }
+    selfUrlWriteRef.current = null;
     const ft = searchParams.get('ft');
     if (ft) {
       const t = searchParams.get('t');
@@ -811,10 +833,18 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
   // Fetch program schedule
   useEffect(() => {
     let active = true;
-    setLoading(true);
+    // Only show the spinner (and re-arm auto-scroll) for a genuinely new
+    // station/date. Re-runs for the same schedule keep the current list
+    // visible instead of flashing a loading state.
+    const fetchKey = `${stationId}:${selectedDate}`;
+    const isNewSchedule = fetchedKeyRef.current !== fetchKey;
+    fetchedKeyRef.current = fetchKey;
+    if (isNewSchedule) {
+      setLoading(true);
+      hasScrolledRef.current = false;
+    }
     setError(null);
     setPlaybackNotice(null);
-    hasScrolledRef.current = false;
     const params = new URLSearchParams({ stationId, date: selectedDate });
     fetch(`/api/programs?${params}`)
       .then((res) => res.json())
@@ -1088,6 +1118,7 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
       setTimeout(() => seekLive(seekTo), 1500);
     }
     // Clear timefree params from URL
+    selfUrlWriteRef.current = '';
     window.history.replaceState(null, '', window.location.pathname);
   }, [data, playLive, seekLive]);
 
@@ -1123,6 +1154,7 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
       setSelectedProgramId(program.id);
       // Update URL with timefree params
       const params = new URLSearchParams({ ft: program.startTime, ...(seekTo && seekTo > 0 ? { t: String(seekTo) } : {}) });
+      selfUrlWriteRef.current = params.toString();
       window.history.replaceState(null, '', `${window.location.pathname}?${params}`);
     },
     [data, playTimefree]
@@ -1189,7 +1221,7 @@ export default function ProgramSchedule({ stationId }: { stationId: string }) {
 
   return (
     <>
-      <UrlSync stationId={stationId} />
+      <UrlSync stationId={stationId} selfWriteRef={selfUrlWriteRef} />
       <div className="flex flex-1 lg:min-h-0 gap-0 lg:gap-6">
         {/* === Left: Program detail (main area) === */}
         {/* Mobile: flows with document scroll for pull-to-refresh. Desktop: internal scroll for dual-pane layout. */}
